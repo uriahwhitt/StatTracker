@@ -1,0 +1,127 @@
+import { useState, useEffect } from "react";
+import { T, circBtn } from "../../utils/constants";
+import { fmtGameDate } from "../../utils/dates";
+import { deriveTeamStats, deriveOpponentStats } from "../../utils/scorebookEngine";
+import GameSetup from "./GameSetup";
+import LiveScorebook from "./LiveScorebook";
+import SectionLabel from "../common/SectionLabel";
+
+export default function ScorebookView({ db, updateDb, onLiveChange }) {
+  const [mode, setMode] = useState("list"); // "list" | "setup" | "live"
+  const [activeGameId, setActiveGameId] = useState(null);
+
+  // Notify parent when live state changes
+  useEffect(() => { onLiveChange?.(mode === "live"); }, [mode]);
+
+  const startNewGame = () => setMode("setup");
+
+  const onSetupComplete = (game) => {
+    const newDb = { ...db, scorebookGames: [...db.scorebookGames, game] };
+    updateDb(newDb);
+    setActiveGameId(game.id);
+    setMode("live");
+  };
+
+  const resumeGame = (gameId) => {
+    setActiveGameId(gameId);
+    setMode("live");
+  };
+
+  const exitGame = () => {
+    setActiveGameId(null);
+    setMode("list");
+  };
+
+  // Live scorebook takes over the full screen
+  if (mode === "live" && activeGameId) {
+    return <LiveScorebook db={db} updateDb={updateDb} gameId={activeGameId} onExit={exitGame} />;
+  }
+
+  // Setup wizard
+  if (mode === "setup") {
+    return <GameSetup db={db} onComplete={onSetupComplete} onCancel={() => setMode("list")} />;
+  }
+
+  // Game list
+  const games = db.scorebookGames || [];
+  const liveGames = games.filter(g => g.status === "live");
+  const completedGames = games.filter(g => g.status === "completed" || g.status === "finalized");
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#fff" }}>Scorebook</div>
+        <button onClick={startNewGame} style={{
+          background: `linear-gradient(135deg, ${T.orange}, #ea580c)`,
+          color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px",
+          fontSize: 14, fontWeight: 700, cursor: "pointer",
+          boxShadow: "0 4px 16px rgba(249,115,22,0.3)",
+        }}>+ New Game</button>
+      </div>
+
+      {liveGames.length > 0 && (
+        <>
+          <SectionLabel label="In Progress" color={T.green} />
+          {liveGames.map(g => {
+            const home = deriveTeamStats(g.events, g.format);
+            const opp = deriveOpponentStats(g.events);
+            return (
+              <div key={g.id} onClick={() => resumeGame(g.id)} style={{
+                background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)",
+                borderRadius: 14, padding: "14px 16px", marginBottom: 10, cursor: "pointer",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#fff", fontSize: 15 }}>vs {g.opponent}</div>
+                    <div style={{ fontSize: 12, color: "#444", marginTop: 2 }}>{fmtGameDate(g)}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22, fontWeight: 900, color: "#fff" }}>
+                      {home.score} <span style={{ color: "#555" }}>-</span> {opp.score}
+                    </div>
+                    <div style={{ fontSize: 11, color: T.green, fontWeight: 700 }}>TAP TO RESUME</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {completedGames.length > 0 && (
+        <>
+          <SectionLabel label="Completed" color={T.blue} />
+          {completedGames.map(g => {
+            const home = deriveTeamStats(g.events, g.format);
+            const opp = deriveOpponentStats(g.events);
+            return (
+              <div key={g.id} style={{
+                background: T.card, border: `1px solid ${T.border}`,
+                borderRadius: 14, padding: "14px 16px", marginBottom: 10,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#fff", fontSize: 15 }}>vs {g.opponent}</div>
+                    <div style={{ fontSize: 12, color: "#444", marginTop: 2 }}>{fmtGameDate(g)}</div>
+                    <div style={{ fontSize: 11, color: g.status === "finalized" ? T.blue : T.orange, marginTop: 2, fontWeight: 600 }}>
+                      {g.status === "finalized" ? "Finalized" : "Completed"}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22, fontWeight: 900, color: "#fff" }}>
+                    {home.score} <span style={{ color: "#555" }}>-</span> {opp.score}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {games.length === 0 && (
+        <div style={{ color: "#333", textAlign: "center", marginTop: 70, fontSize: 15 }}>
+          No scorebook games yet.<br />Tap + New Game to start! 📋
+        </div>
+      )}
+    </div>
+  );
+}

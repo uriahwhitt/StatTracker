@@ -1,0 +1,214 @@
+// ── Scorebook Event-Sourcing Engine ──────────────────────────────────────────
+// Pure functions — no React, no side effects. All stats derived from event replay.
+
+export const createEvent = (type, period, playerId = null, extras = {}) => ({
+  id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+  timestamp: new Date().toISOString(),
+  period,
+  type,
+  playerId,
+  linkedEventId: null,
+  deleted: false,
+  ...extras,
+});
+
+const activeEvents = (events) => events.filter(e => !e.deleted);
+
+// ── Player Stats ─────────────────────────────────────────────────────────────
+export const derivePlayerStats = (events, playerId) => {
+  const stats = {
+    pts2: 0, pts2a: 0, pts3: 0, pts3a: 0, ft: 0, fta: 0,
+    oreb: 0, dreb: 0, ast: 0, stl: 0, blk: 0, tov: 0, foul: 0, techFoul: 0,
+  };
+
+  for (const e of activeEvents(events)) {
+    if (e.playerId !== playerId) continue;
+    switch (e.type) {
+      case "2pt_made": stats.pts2++; stats.pts2a++; break;
+      case "2pt_missed": stats.pts2a++; break;
+      case "3pt_made": stats.pts3++; stats.pts3a++; break;
+      case "3pt_missed": stats.pts3a++; break;
+      case "ft_made": stats.ft++; stats.fta++; break;
+      case "ft_missed": stats.fta++; break;
+      case "oreb": stats.oreb++; break;
+      case "dreb": stats.dreb++; break;
+      case "assist": stats.ast++; break;
+      case "steal": stats.stl++; break;
+      case "block": stats.blk++; break;
+      case "turnover": stats.tov++; break;
+      case "personal_foul": stats.foul++; break;
+      case "technical_foul": stats.techFoul++; break;
+    }
+  }
+
+  stats.points = stats.pts2 * 2 + stats.pts3 * 3 + stats.ft;
+  return stats;
+};
+
+// ── Team Stats (Home) ────────────────────────────────────────────────────────
+export const deriveTeamStats = (events, format) => {
+  const active = activeEvents(events);
+  let score = 0;
+  const foulsByPeriod = {};
+
+  for (const e of active) {
+    if (!e.playerId) continue; // skip team-level events for scoring
+    switch (e.type) {
+      case "2pt_made": score += 2; break;
+      case "3pt_made": score += 3; break;
+      case "ft_made": score += 1; break;
+      case "personal_foul":
+      case "technical_foul":
+      case "team_tech_foul": {
+        const p = e.period || 1;
+        // For bonus tracking, group by half (periods 1-2 = first half, 3-4 = second half)
+        const half = format?.periodType === "quarter" ? (p <= 2 ? 1 : 2) : p;
+        const foulVal = (e.type === "technical_foul" || e.type === "team_tech_foul") ? 2 : 1;
+        foulsByPeriod[half] = (foulsByPeriod[half] || 0) + foulVal;
+        break;
+      }
+    }
+  }
+
+  // Current half's fouls for bonus display
+  const currentPeriod = active.filter(e => e.type === "period_start").length || 1;
+  const currentHalf = format?.periodType === "quarter" ? (currentPeriod <= 2 ? 1 : 2) : currentPeriod;
+  const teamFouls = foulsByPeriod[currentHalf] || 0;
+
+  return { score, teamFouls, foulsByPeriod };
+};
+
+// ── Opponent Stats ───────────────────────────────────────────────────────────
+export const deriveOpponentStats = (events) => {
+  const active = activeEvents(events);
+  let score = 0;
+  let fouls = 0;
+
+  for (const e of active) {
+    switch (e.type) {
+      case "opp_score_1": score += 1; break;
+      case "opp_score_2": score += 2; break;
+      case "opp_score_3": score += 3; break;
+      case "opp_foul": fouls++; break;
+      case "opp_tech_foul": fouls += 2; break;
+    }
+  }
+
+  return { score, fouls };
+};
+
+// ── Timeout tracking ─────────────────────────────────────────────────────────
+export const deriveTimeouts = (events, format) => {
+  const active = activeEvents(events);
+  const homeUsed = active.filter(e => e.type === "timeout_home").length;
+  const awayUsed = active.filter(e => e.type === "timeout_away").length;
+  return {
+    homeUsed,
+    awayUsed,
+    homeRemaining: (format?.homeTimeouts || 5) - homeUsed,
+    awayRemaining: (format?.awayTimeouts || 5) - awayUsed,
+  };
+};
+
+// ── Active Players (replay substitutions) ────────────────────────────────────
+export const getActivePlayers = (events, initialFive) => {
+  let current = [...initialFive];
+  for (const e of activeEvents(events)) {
+    if (e.type === "substitution_out" && e.replacedById) {
+      const idx = current.indexOf(e.playerId);
+      if (idx !== -1) current[idx] = e.replacedById;
+    }
+  }
+  return current;
+};
+
+// ── Activated Players (ever on court) ────────────────────────────────────────
+export const getActivatedPlayers = (events, initialFive) => {
+  const activated = new Set(initialFive);
+  for (const e of activeEvents(events)) {
+    if (e.type === "substitution_in") activated.add(e.playerId);
+  }
+  return [...activated];
+};
+
+// ── Current Period ───────────────────────────────────────────────────────────
+export const getCurrentPeriod = (events) => {
+  const starts = activeEvents(events).filter(e => e.type === "period_start");
+  return starts.length > 0 ? Math.max(...starts.map(e => e.period)) : 1;
+};
+
+// ── Full Box Score ───────────────────────────────────────────────────────────
+export const deriveBoxScore = (events, roster) => {
+  return roster.map(r => ({
+    ...r,
+    stats: derivePlayerStats(events, r.playerId),
+  }));
+};
+
+// ── Format Event for Display ─────────────────────────────────────────────────
+export const formatEventDescription = (event, roster) => {
+  const player = roster.find(r => r.playerId === event.playerId);
+  const tag = player ? `#${player.jerseyNumber} ${player.name}` : "";
+
+  const labels = {
+    "2pt_made": `${tag} — 2PT Made`,
+    "2pt_missed": `${tag} — 2PT Miss`,
+    "3pt_made": `${tag} — 3PT Made`,
+    "3pt_missed": `${tag} — 3PT Miss`,
+    "ft_made": `${tag} — FT Made`,
+    "ft_missed": `${tag} — FT Miss`,
+    "oreb": `${tag} — Off Rebound`,
+    "dreb": `${tag} — Def Rebound`,
+    "assist": `${tag} — Assist`,
+    "steal": `${tag} — Steal`,
+    "block": `${tag} — Block`,
+    "turnover": `${tag} — Turnover`,
+    "personal_foul": `${tag} — Foul`,
+    "technical_foul": `${tag} — Tech Foul`,
+    "substitution_in": `${tag} — Subbed In`,
+    "substitution_out": `${tag} — Subbed Out`,
+    "opp_score_1": "Opponent +1 (FT)",
+    "opp_score_2": "Opponent +2 (FG)",
+    "opp_score_3": "Opponent +3 (3PT)",
+    "opp_foul": "Opponent Foul",
+    "opp_tech_foul": "Opponent Tech Foul",
+    "team_tech_foul": "Team Tech Foul (Bench/Coach)",
+    "timeout_home": "Home Timeout",
+    "timeout_away": "Away Timeout",
+    "period_start": `Period ${event.period} Start`,
+    "period_end": `Period ${event.period} End`,
+  };
+
+  return labels[event.type] || event.type;
+};
+
+// ── Convert to Individual Game Record ────────────────────────────────────────
+export const convertToIndividualGame = (scorebookGame, playerId) => {
+  const stats = derivePlayerStats(scorebookGame.events, playerId);
+  return {
+    id: `sb_gen_${scorebookGame.id}_${playerId}_${Date.now()}`,
+    date: scorebookGame.createdAt,
+    gameDate: scorebookGame.gameDate,
+    opponent: scorebookGame.opponent,
+    tournamentId: scorebookGame.tournamentId || null,
+    playerId,
+    stats: {
+      pts2: stats.pts2,
+      pts2a: stats.pts2a,
+      pts3: stats.pts3,
+      pts3a: stats.pts3a,
+      ft: stats.ft,
+      fta: stats.fta,
+      oreb: stats.oreb,
+      dreb: stats.dreb,
+      ast: stats.ast,
+      stl: stats.stl,
+      blk: stats.blk,
+      tov: stats.tov,
+      foul: stats.foul,
+    },
+    points: stats.points,
+    source: "scorebook",
+    scorebookGameId: scorebookGame.id,
+  };
+};
