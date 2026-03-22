@@ -1,41 +1,48 @@
+import { useState, useRef } from "react";
 import { T } from "../../utils/constants";
+import FlashButton from "../common/FlashButton";
 
-export default function OpponentStrip({ opponent, score, fouls, timeouts, onScore, onFoul, onTechFoul, onTimeout }) {
-  const btn = (label, color, onClick) => (
-    <button onClick={onClick} style={{
-      background: `${color}44`, border: `1px solid ${color}88`, color: "#fff",
-      borderRadius: 8, padding: "8px 12px", fontSize: 13, fontWeight: 800,
-      cursor: "pointer", minHeight: 38,
-    }}>{label}</button>
-  );
+export default function OpponentStrip({ opponent, onScore, onFoul, onTechFoul, onTimeout }) {
+  const [popup, setPopup] = useState(null);
+  const popupTimer = useRef(null);
+
+  const fire = (action, label, color) => {
+    action();
+    setPopup({ label, color });
+    if (popupTimer.current) clearTimeout(popupTimer.current);
+    popupTimer.current = setTimeout(() => setPopup(null), 600);
+  };
 
   return (
     <div style={{
-      background: "rgba(59,130,246,0.08)",
-      borderTop: `1px solid rgba(59,130,246,0.3)`,
-      padding: "8px 10px env(safe-area-inset-bottom, 8px)",
+      background: "rgba(59,130,246,0.06)",
+      borderTop: `1px solid rgba(59,130,246,0.2)`,
+      padding: "6px 10px env(safe-area-inset-bottom, 6px)",
       flexShrink: 0,
+      position: "relative",
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>{opponent}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 20, fontWeight: 900, color: "#fff" }}>{score}</span>
-            <span style={{ fontSize: 10, color: "#777" }}>PF:{fouls}</span>
-            <span style={{ fontSize: 10, color: "#777" }}>
-              TOs:{Array.from({ length: timeouts.awayRemaining }, () => "●").join("")}
-              {Array.from({ length: timeouts.awayUsed }, () => "○").join("")}
-            </span>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 4 }}>
-          {btn("+1", T.blue, () => onScore(1))}
-          {btn("+2", T.blue, () => onScore(2))}
-          {btn("+3", T.blue, () => onScore(3))}
-          {btn("PF", "#F59E0B", onFoul)}
-          {btn("TF", T.red, onTechFoul)}
-          {btn("TO", T.orange, onTimeout)}
-        </div>
+      {popup && (
+        <div style={{
+          position: "absolute", top: -28, left: "50%", transform: "translateX(-50%)",
+          background: popup.color, color: "#fff", fontWeight: 900,
+          fontSize: 15, fontFamily: "'DM Mono',monospace",
+          padding: "2px 12px", borderRadius: 8,
+          animation: "fadeUp 0.6s ease-out forwards",
+          pointerEvents: "none", zIndex: 10,
+        }}>{popup.label}</div>
+      )}
+
+      <div style={{ fontSize: 11, color: "#667", fontWeight: 700, textAlign: "center", marginBottom: 4 }}>
+        {opponent}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 4 }}>
+        <FlashButton label="+2" bg="rgba(34,197,94,0.3)" border="rgba(34,197,94,0.55)" onClick={() => fire(() => onScore(2), "+2", T.green)} />
+        <FlashButton label="+3" bg="rgba(34,197,94,0.3)" border="rgba(34,197,94,0.55)" onClick={() => fire(() => onScore(3), "+3", T.green)} />
+        <FlashButton label="+1" bg="rgba(34,197,94,0.25)" border="rgba(34,197,94,0.5)" onClick={() => fire(() => onScore(1), "+1", T.green)} />
+        <FlashButton label="PF" bg="rgba(245,158,11,0.3)" border="rgba(245,158,11,0.55)" onClick={() => fire(onFoul, "+PF", "#F59E0B")} />
+        <FlashButton label="TF" bg="rgba(239,68,68,0.3)" border="rgba(239,68,68,0.55)" onClick={() => fire(onTechFoul, "+TF", T.red)} />
+        <FlashButton label="T/O" bg="rgba(59,130,246,0.3)" border="rgba(59,130,246,0.55)" onClick={() => fire(onTimeout, "T/O", T.blue)} />
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import { T } from "../../utils/constants";
 const tabs = [
   { v: "tracker", icon: "🏀", label: "Track" },
   { v: "scorebook", icon: "📋", label: "Scorebook" },
-  { v: "history", icon: "📊", label: "Games" },
+  { v: "history", icon: "📊", label: "History" },
   { v: "reports", icon: "📈", label: "Reports" },
   { v: "manage", icon: "⚙️", label: "Manage" },
 ];

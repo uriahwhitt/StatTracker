@@ -2,24 +2,42 @@ import { useState } from "react";
 import { T, circBtn } from "../../utils/constants";
 import { todayStr } from "../../utils/dates";
 
-export default function GameSetup({ db, onComplete, onCancel }) {
+export default function GameSetup({ db, initialGame, onComplete, onCancel }) {
   const [step, setStep] = useState(1); // 1: team, 2: format, 3: details, 4: roster/starting5
   const [orgId, setOrgId] = useState(db.organizations[0]?.id || "");
-  const [teamId, setTeamId] = useState("");
-  const [gameRoster, setGameRoster] = useState([]); // working roster for this game
+  const [teamId, setTeamId] = useState(() => {
+    const tid = initialGame?.homeTeamId || initialGame?.teamId || "";
+    return tid;
+  });
+  const [gameRoster, setGameRoster] = useState(() => {
+    const tid = initialGame?.homeTeamId || initialGame?.teamId || "";
+    if (!tid) return [];
+    const team = db.teams.find(t => t.id === tid);
+    if (!team) return [];
+    const source = team.tempRoster || team.roster || [];
+    return source.map(r => ({
+      playerId: r.playerId,
+      name: db.players.find(p => p.id === r.playerId)?.name || "Unknown",
+      jerseyNumber: r.jerseyNumber,
+    }));
+  });
   const [format, setFormat] = useState({
     periodType: "quarter",
     periods: 4,
     periodLength: 8,
     foulsToDisqualify: 5,
-    bonusThreshold: 7,
-    doubleBonusThreshold: 10,
-    homeTimeouts: 5,
-    awayTimeouts: 5,
+    doubleBonusFoulLimit: 10,
+    foulResetPeriod: "half",
+    singleBonusEnabled: false,
+    singleBonusFoulLimit: 7,
+    timeoutsPerHalf: 4,
   });
-  const [opponent, setOpponent] = useState("");
-  const [tournamentId, setTournamentId] = useState("");
-  const [gameDate, setGameDate] = useState(todayStr);
+  const [opponent, setOpponent] = useState(initialGame?.opponent || "");
+  const [tournamentId, setTournamentId] = useState(initialGame?.tournamentId || "");
+  const [phase, setPhase] = useState(initialGame?.phase || null);
+  const [bracketName, setBracketName] = useState(initialGame?.bracketName || "");
+  const [round, setRound] = useState(initialGame?.round || "");
+  const [gameDate, setGameDate] = useState(initialGame?.gameDate || todayStr);
   const [startingFive, setStartingFive] = useState([]);
 
   const teamsForOrg = db.teams.filter(t => t.orgId === orgId);
@@ -54,8 +72,12 @@ export default function GameSetup({ db, onComplete, onCancel }) {
       createdAt: new Date().toISOString(),
       orgId,
       teamId,
+      scheduledGameId: initialGame?.id || null,
       opponent: opponent.trim() || "Unknown Opponent",
       tournamentId: tournamentId || null,
+      phase: phase || null,
+      bracketName: phase === "bracket" ? bracketName.trim() || null : null,
+      round: phase === "bracket" ? round.trim() || null : null,
       gameDate,
       format,
       roster: gameRoster,
@@ -79,6 +101,11 @@ export default function GameSetup({ db, onComplete, onCancel }) {
 
   const sectionStyle = { marginBottom: 16 };
   const labelStyle = { fontSize: 11, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 };
+  const stepperBtn = {
+    background: "rgba(255,255,255,0.08)", border: `1px solid ${T.border}`,
+    color: "#fff", borderRadius: 8, width: 32, height: 32, fontSize: 18, fontWeight: 700,
+    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+  };
 
   return (
     <div style={{ marginTop: 16 }}>
@@ -144,6 +171,7 @@ export default function GameSetup({ db, onComplete, onCancel }) {
       {/* Step 2: Game Format */}
       {step === 2 && (
         <div>
+          {/* Period type */}
           <div style={sectionStyle}>
             <div style={labelStyle}>Period Type</div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -157,11 +185,12 @@ export default function GameSetup({ db, onComplete, onCancel }) {
               ))}
             </div>
           </div>
+
+          {/* Period length */}
           <div style={sectionStyle}>
             <div style={labelStyle}>Period Length (minutes)</div>
             <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
               {[6, 8, 10, 12, 16, 20].map(len => {
-                const presetSelected = [6, 8, 10, 12, 16, 20].includes(format.periodLength);
                 const isActive = format.periodLength === len;
                 return (
                   <button key={len} onClick={() => setFormat(f => ({ ...f, periodLength: len }))} style={{
@@ -176,18 +205,136 @@ export default function GameSetup({ db, onComplete, onCancel }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 12, color: "#555", fontWeight: 700, flexShrink: 0 }}>Custom:</span>
               <input
-                type="number"
-                min="1"
-                max="30"
-                placeholder="Min"
+                type="number" min="1" max="30" placeholder="Min"
                 value={![6, 8, 10, 12, 16, 20].includes(format.periodLength) ? format.periodLength : ""}
-                onChange={e => {
-                  const v = parseInt(e.target.value);
-                  if (v > 0 && v <= 30) setFormat(f => ({ ...f, periodLength: v }));
-                }}
+                onChange={e => { const v = parseInt(e.target.value); if (v > 0 && v <= 30) setFormat(f => ({ ...f, periodLength: v })); }}
                 style={{ width: 70, minWidth: 70, textAlign: "center", fontSize: 14, fontWeight: 700, padding: "8px 10px" }}
               />
               <span style={{ fontSize: 12, color: "#444" }}>minutes</span>
+            </div>
+          </div>
+
+          {/* Foul rules */}
+          <div style={sectionStyle}>
+            <div style={labelStyle}>Foul Rules</div>
+
+            {/* Double bonus foul limit */}
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#ddd" }}>Double Bonus at</div>
+                  <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>Team fouls triggering 2 free throws</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={() => setFormat(f => ({ ...f, doubleBonusFoulLimit: Math.max(1, (f.doubleBonusFoulLimit || 10) - 1) }))}
+                    style={{ ...stepperBtn }}>−</button>
+                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 16, fontWeight: 900, color: T.orange, minWidth: 24, textAlign: "center" }}>
+                    {format.doubleBonusFoulLimit}
+                  </span>
+                  <button onClick={() => setFormat(f => ({ ...f, doubleBonusFoulLimit: Math.min(30, (f.doubleBonusFoulLimit || 10) + 1) }))}
+                    style={{ ...stepperBtn }}>+</button>
+                </div>
+              </div>
+            </div>
+
+            {/* Foul reset period */}
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#ddd", marginBottom: 8 }}>Fouls Reset Every</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["half", "Half"], ["quarter", "Quarter"]].map(([val, label]) => (
+                  <button key={val} onClick={() => setFormat(f => ({ ...f, foulResetPeriod: val }))} style={{
+                    flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                    background: format.foulResetPeriod === val ? "rgba(249,115,22,0.15)" : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${format.foulResetPeriod === val ? "rgba(249,115,22,0.4)" : T.border}`,
+                    color: format.foulResetPeriod === val ? T.orange : "#666",
+                  }}>{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Single bonus toggle */}
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#ddd" }}>Single Bonus (1-and-1)</div>
+                  <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>Legacy leagues only — off by default</div>
+                </div>
+                <button onClick={() => setFormat(f => ({ ...f, singleBonusEnabled: !f.singleBonusEnabled }))} style={{
+                  width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer",
+                  background: format.singleBonusEnabled ? T.orange : "rgba(255,255,255,0.1)",
+                  position: "relative", transition: "background 0.2s",
+                }}>
+                  <div style={{
+                    position: "absolute", top: 3, left: format.singleBonusEnabled ? 23 : 3,
+                    width: 18, height: 18, borderRadius: "50%", background: "#fff",
+                    transition: "left 0.2s",
+                  }} />
+                </button>
+              </div>
+            </div>
+
+            {/* Single bonus foul limit (dimmed when disabled) */}
+            <div style={{
+              background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 8,
+              opacity: format.singleBonusEnabled ? 1 : 0.4,
+              pointerEvents: format.singleBonusEnabled ? "auto" : "none",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#ddd" }}>Single Bonus at</div>
+                  <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>Team fouls triggering 1-and-1</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={() => setFormat(f => ({ ...f, singleBonusFoulLimit: Math.max(1, (f.singleBonusFoulLimit || 7) - 1) }))}
+                    style={{ ...stepperBtn }}>−</button>
+                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 16, fontWeight: 900, color: "#F59E0B", minWidth: 24, textAlign: "center" }}>
+                    {format.singleBonusFoulLimit}
+                  </span>
+                  <button onClick={() => setFormat(f => ({ ...f, singleBonusFoulLimit: Math.min(30, (f.singleBonusFoulLimit || 7) + 1) }))}
+                    style={{ ...stepperBtn }}>+</button>
+                </div>
+              </div>
+            </div>
+
+            {/* Fouls to disqualify */}
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#ddd" }}>Foul Out at</div>
+                  <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>Personal fouls before disqualification</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={() => setFormat(f => ({ ...f, foulsToDisqualify: Math.max(1, (f.foulsToDisqualify || 5) - 1) }))}
+                    style={{ ...stepperBtn }}>−</button>
+                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 16, fontWeight: 900, color: T.red, minWidth: 24, textAlign: "center" }}>
+                    {format.foulsToDisqualify}
+                  </span>
+                  <button onClick={() => setFormat(f => ({ ...f, foulsToDisqualify: Math.min(10, (f.foulsToDisqualify || 5) + 1) }))}
+                    style={{ ...stepperBtn }}>+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Timeouts */}
+          <div style={sectionStyle}>
+            <div style={labelStyle}>Timeouts</div>
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#ddd" }}>Timeouts per Half</div>
+                  <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>Resets for each team each half</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={() => setFormat(f => ({ ...f, timeoutsPerHalf: Math.max(0, (f.timeoutsPerHalf ?? 4) - 1) }))}
+                    style={{ ...stepperBtn }}>−</button>
+                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 16, fontWeight: 900, color: T.blue, minWidth: 24, textAlign: "center" }}>
+                    {format.timeoutsPerHalf ?? 4}
+                  </span>
+                  <button onClick={() => setFormat(f => ({ ...f, timeoutsPerHalf: Math.min(10, (f.timeoutsPerHalf ?? 4) + 1) }))}
+                    style={{ ...stepperBtn }}>+</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

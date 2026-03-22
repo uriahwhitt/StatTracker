@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { T } from "./utils/constants";
 import { loadDb, persist, loadActivePlayer, persistActivePlayer } from "./utils/storage";
 import { defaultStats, calcPoints } from "./utils/stats";
@@ -12,24 +12,90 @@ import ReportsView from "./components/reports/ReportsView";
 import ManageView from "./components/manage/ManageView";
 import ScorebookView from "./components/scorebook/ScorebookView";
 
+// ── One-time data migration (v3) ──────────────────────────────────────────────
+const runMigrationV3 = () => {
+  if (localStorage.getItem("hasRunMigration_v3")) return;
+  const raw = JSON.parse(localStorage.getItem("bball_tracker_v2")) || {};
+  if (!raw.players && !raw.games && !raw.scorebookGames) {
+    localStorage.setItem("hasRunMigration_v3", "1");
+    return;
+  }
+
+  let orgs = raw.organizations || [];
+  let players = raw.players || [];
+  let games = raw.games || [];
+  let sbGames = raw.scorebookGames || [];
+
+  // Ensure a default org exists if players exist
+  let defaultOrgId = orgs[0]?.id;
+  if (!defaultOrgId && players.length > 0) {
+    const defaultOrg = { id: "default_org", name: "My Organization" };
+    orgs = [defaultOrg, ...orgs];
+    defaultOrgId = defaultOrg.id;
+  }
+
+  // players: add orgId if missing
+  players = players.map(p =>
+    p.orgId ? p : { ...p, orgId: defaultOrgId || "default_org" }
+  );
+
+  // games: add missing fields (additive only)
+  games = games.map(g => ({
+    teamId: null,
+    phase: null,
+    bracketName: null,
+    round: null,
+    ...g,
+  }));
+
+  // scorebookGames: add missing fields + migrate bonusThreshold → doubleBonusFoulLimit
+  sbGames = sbGames.map(g => {
+    const migratedFormat = g.format ? {
+      ...g.format,
+      doubleBonusFoulLimit: g.format.doubleBonusFoulLimit ?? g.format.bonusThreshold ?? 10,
+    } : g.format;
+    return {
+      scheduledGameId: null,
+      phase: null,
+      bracketName: null,
+      round: null,
+      ...g,
+      format: migratedFormat,
+    };
+  });
+
+  const migrated = { ...raw, organizations: orgs, players, games, scorebookGames: sbGames, scheduledGames: raw.scheduledGames || [] };
+  localStorage.setItem("bball_tracker_v2", JSON.stringify(migrated));
+  localStorage.setItem("hasRunMigration_v3", "1");
+};
+
+// Run migration before any state is initialized
+runMigrationV3();
+
 export default function App() {
   const [view, setView] = useState("tracker");
-  const [db, setDb] = useState(() => {
-    const loaded = loadDb();
-    if (loaded.players.length === 0 && loaded.games.length > 0) {
-      const defaultPlayer = { id: "default", name: "Player 1" };
-      loaded.players = [defaultPlayer];
-      loaded.games = loaded.games.map(g => g.playerId ? g : { ...g, playerId: "default" });
-      persist(loaded);
-    }
-    return loaded;
-  });
-  const [activePlayerId, setActivePlayerId] = useState(() => {
-    const saved = loadActivePlayer();
-    const loaded = loadDb();
-    if (saved && loaded.players.some(p => p.id === saved)) return saved;
-    return loaded.players.length > 0 ? loaded.players[0].id : "";
-  });
+  const [db, setDb] = useState(null);
+  const [activePlayerId, setActivePlayerId] = useState("");
+
+  // ── Async initial load from Firestore ────────────────────────────────────────
+  useEffect(() => {
+    loadDb().then(loaded => {
+      if (loaded.players.length === 0 && loaded.games.length > 0) {
+        const defaultPlayer = { id: "default", name: "Player 1" };
+        loaded.players = [defaultPlayer];
+        loaded.games = loaded.games.map(g => g.playerId ? g : { ...g, playerId: "default" });
+        persist(loaded);
+      }
+      setDb(loaded);
+
+      const saved = loadActivePlayer();
+      if (saved && loaded.players.some(p => p.id === saved)) {
+        setActivePlayerId(saved);
+      } else if (loaded.players.length > 0) {
+        setActivePlayerId(loaded.players[0].id);
+      }
+    });
+  }, []);
 
   const [stats, setStats] = useState(defaultStats());
   const [opponent, setOpponent] = useState("");
@@ -187,6 +253,14 @@ export default function App() {
   const handleScorebookLiveChange = (isLive) => setScorebookLive(isLive);
 
   // ── Render ──────────────────────────────────────────────────────────────────
+  if (!db) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ color: "#444", fontSize: 14, fontFamily: "'DM Sans',sans-serif" }}>Loading…</div>
+      </div>
+    );
+  }
+
   const hideChrome = view === "scorebook" && scorebookLive;
 
   return (
@@ -224,12 +298,7 @@ export default function App() {
         )}
 
         {view === "history" && (
-          <HistoryView
-            db={db} playerGames={playerGames} activePlayer={activePlayer}
-            selectedGame={selectedGame} setSelectedGame={setSelectedGame}
-            editGame={editGame} updateGameTournament={updateGameTournament}
-            confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} confirmAndDelete={confirmAndDelete}
-          />
+          <HistoryView db={db} setView={navTo} />
         )}
 
         {view === "tournament" && (
@@ -242,18 +311,11 @@ export default function App() {
         )}
 
         {view === "reports" && (
-          <ReportsView
-            activePlayer={activePlayer} playerGames={playerGames} db={db}
-            setView={setView} setSelectedGame={setSelectedGame}
-          />
+          <ReportsView db={db} />
         )}
 
         {view === "manage" && (
-          <ManageView
-            db={db} updateDb={updateDb} activePlayerId={activePlayerId} setActivePlayer={setActivePlayer}
-            activePlayer={activePlayer} playerGames={playerGames} addPlayer={addPlayer}
-            confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} confirmAndDelete={confirmAndDelete}
-          />
+          <ManageView db={db} updateDb={updateDb} />
         )}
       </div>
 

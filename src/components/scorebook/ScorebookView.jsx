@@ -9,15 +9,29 @@ import SectionLabel from "../common/SectionLabel";
 export default function ScorebookView({ db, updateDb, onLiveChange }) {
   const [mode, setMode] = useState("list"); // "list" | "setup" | "live"
   const [activeGameId, setActiveGameId] = useState(null);
+  const [initialGame, setInitialGame] = useState(null); // pre-loaded from scheduled game
 
   // Notify parent when live state changes
   useEffect(() => { onLiveChange?.(mode === "live"); }, [mode]);
 
-  const startNewGame = () => setMode("setup");
+  const startNewGame = (preload = null) => {
+    setInitialGame(preload);
+    setMode("setup");
+  };
 
   const onSetupComplete = (game) => {
     const newDb = { ...db, scorebookGames: [...db.scorebookGames, game] };
-    updateDb(newDb);
+
+    // If loaded from a scheduled game, mark it as live
+    if (game.scheduledGameId) {
+      const updatedScheduled = (db.scheduledGames || []).map(sg =>
+        sg.id === game.scheduledGameId ? { ...sg, status: "live" } : sg
+      );
+      updateDb({ ...newDb, scheduledGames: updatedScheduled });
+    } else {
+      updateDb(newDb);
+    }
+
     setActiveGameId(game.id);
     setMode("live");
   };
@@ -30,6 +44,7 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
   const exitGame = () => {
     setActiveGameId(null);
     setMode("list");
+    setInitialGame(null);
   };
 
   // Live scorebook takes over the full screen
@@ -39,25 +54,59 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
 
   // Setup wizard
   if (mode === "setup") {
-    return <GameSetup db={db} onComplete={onSetupComplete} onCancel={() => setMode("list")} />;
+    return (
+      <GameSetup
+        db={db}
+        initialGame={initialGame}
+        onComplete={onSetupComplete}
+        onCancel={() => { setMode("list"); setInitialGame(null); }}
+      />
+    );
   }
 
   // Game list
   const games = db.scorebookGames || [];
   const liveGames = games.filter(g => g.status === "live");
   const completedGames = games.filter(g => g.status === "completed" || g.status === "finalized");
+  const upcomingScheduled = (db.scheduledGames || []).filter(g => g.status === "scheduled");
 
   return (
     <div style={{ marginTop: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div style={{ fontSize: 18, fontWeight: 800, color: "#fff" }}>Scorebook</div>
-        <button onClick={startNewGame} style={{
+        <button onClick={() => startNewGame()} style={{
           background: `linear-gradient(135deg, ${T.orange}, #ea580c)`,
           color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px",
           fontSize: 14, fontWeight: 700, cursor: "pointer",
           boxShadow: "0 4px 16px rgba(249,115,22,0.3)",
         }}>+ New Game</button>
       </div>
+
+      {/* ── Load from schedule ── */}
+      {upcomingScheduled.length > 0 && (
+        <>
+          <SectionLabel label="Load from Schedule" color={T.blue} />
+          {upcomingScheduled.map(sg => {
+            const team = db.teams.find(t => t.id === sg.homeTeamId || t.id === sg.teamId);
+            return (
+              <div key={sg.id} onClick={() => startNewGame(sg)} style={{
+                background: "rgba(59,130,246,0.07)", border: "1px solid rgba(59,130,246,0.2)",
+                borderRadius: 12, padding: "12px 16px", marginBottom: 8, cursor: "pointer",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#fff", fontSize: 14 }}>vs {sg.opponent}</div>
+                    <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
+                      {team?.name && `${team.name} · `}{sg.gameDate || "No date"}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: T.blue, fontWeight: 700 }}>LOAD ›</div>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
 
       {liveGames.length > 0 && (
         <>
@@ -117,7 +166,7 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
         </>
       )}
 
-      {games.length === 0 && (
+      {games.length === 0 && upcomingScheduled.length === 0 && (
         <div style={{ color: "#333", textAlign: "center", marginTop: 70, fontSize: 15 }}>
           No scorebook games yet.<br />Tap + New Game to start! 📋
         </div>

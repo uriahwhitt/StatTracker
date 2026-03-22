@@ -17,12 +17,12 @@ import EndGameFlow from "./EndGameFlow";
 export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
   const initial = db.scorebookGames.find(g => g.id === gameId);
   const [game, setGame] = useState(initial);
-  const [showSubFor, setShowSubFor] = useState(null); // playerId for individual sub
+  const [showSubFor, setShowSubFor] = useState(null);
   const [showGroupSub, setShowGroupSub] = useState(false);
   const [showEventLog, setShowEventLog] = useState(false);
   const [showEndGame, setShowEndGame] = useState(false);
   const [toast, setToast] = useState(null);
-  const [assistMode, setAssistMode] = useState(null); // { scoringEventId, scorerPlayerId }
+  const [assistMode, setAssistMode] = useState(null);
   const assistTimerRef = useRef(null);
 
   // Autosave
@@ -32,9 +32,9 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
   const events = game?.events || [];
   const period = useMemo(() => getCurrentPeriod(events), [events]);
   const activePlayers = useMemo(() => getActivePlayers(events, game?.initialFive || []), [events, game?.initialFive]);
-  const teamStats = useMemo(() => deriveTeamStats(events, game?.format), [events, game?.format]);
-  const oppStats = useMemo(() => deriveOpponentStats(events), [events]);
-  const timeouts = useMemo(() => deriveTimeouts(events, game?.format), [events, game?.format]);
+  const teamStats = useMemo(() => deriveTeamStats(events, game?.format, period), [events, game?.format, period]);
+  const oppStats = useMemo(() => deriveOpponentStats(events, game?.format, period), [events, game?.format, period]);
+  const timeouts = useMemo(() => deriveTimeouts(events, game?.format, period), [events, game?.format, period]);
   const playerStats = useMemo(() => {
     const map = {};
     for (const pid of activePlayers) {
@@ -48,12 +48,11 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
   const roster = game.roster || [];
   const getPlayer = (pid) => roster.find(r => r.playerId === pid) || { playerId: pid, name: "?", jerseyNumber: "?" };
 
-  // ── Event dispatch ──────────────────────────────────────────────────────────
+  // ── Event dispatch ───────────────────────────────────────────────────────────
   const dispatch = useCallback((type, playerId = null, extras = {}) => {
     const evt = createEvent(type, period, playerId, extras);
     setGame(g => ({ ...g, events: [...g.events, evt] }));
 
-    // Trigger assist mode for field goals only (not free throws)
     if (["2pt_made", "3pt_made"].includes(type) && playerId) {
       if (assistTimerRef.current) clearTimeout(assistTimerRef.current);
       setAssistMode({ scoringEventId: evt.id, scorerPlayerId: playerId });
@@ -76,7 +75,7 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
     setAssistMode(null);
   }, []);
 
-  // ── Undo ────────────────────────────────────────────────────────────────────
+  // ── Undo ─────────────────────────────────────────────────────────────────────
   const undoLast = useCallback(() => {
     setGame(g => {
       const evts = [...g.events];
@@ -84,7 +83,6 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
         if (!evts[i].deleted) {
           evts[i] = { ...evts[i], deleted: true };
           showToast(`Undid: ${formatEventDescription(evts[i], roster)}`);
-          // If undoing a sub_out, also undo the paired sub_in
           if (evts[i].type === "substitution_out" || evts[i].type === "substitution_in") {
             const ts = evts[i].timestamp;
             for (let j = evts.length - 1; j >= 0; j--) {
@@ -113,7 +111,7 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
     setTimeout(() => setToast(null), 2000);
   };
 
-  // ── Substitution ────────────────────────────────────────────────────────────
+  // ── Substitution ─────────────────────────────────────────────────────────────
   const handleSingleSub = (outPlayerId, inPlayerId) => {
     const ts = new Date().toISOString();
     const evtOut = createEvent("substitution_out", period, outPlayerId, { replacedById: inPlayerId, timestamp: ts });
@@ -125,7 +123,6 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
   const handleGroupSub = (newFive) => {
     const ts = new Date().toISOString();
     const newEvents = [];
-    // Find who's going out and who's coming in
     const outPlayers = activePlayers.filter(p => !newFive.includes(p));
     const inPlayers = newFive.filter(p => !activePlayers.includes(p));
     for (let i = 0; i < outPlayers.length; i++) {
@@ -137,22 +134,20 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
     setShowGroupSub(false);
   };
 
-  // ── Period management ───────────────────────────────────────────────────────
-  const advancePeriod = () => {
-    const endEvt = createEvent("period_end", period);
-    const startEvt = createEvent("period_start", period + 1);
-    setGame(g => ({ ...g, events: [...g.events, endEvt, startEvt] }));
-  };
+  // ── Period management ────────────────────────────────────────────────────────
+  // Replaces advancePeriod — allows setting any period by dispatching period_change
+  const handleSetPeriod = useCallback((n) => {
+    const evt = createEvent("period_change", n);
+    setGame(g => ({ ...g, events: [...g.events, evt] }));
+  }, []);
 
-  // ── End game ────────────────────────────────────────────────────────────────
+  // ── End game ─────────────────────────────────────────────────────────────────
   const endGame = () => setShowEndGame(true);
 
   const finalizeGame = () => {
-    // Generate individual game records for all activated players
     const activatedPlayerIds = getActivatedPlayers(game.events, game.initialFive);
     const newIndividualGames = activatedPlayerIds.map(pid => convertToIndividualGame(game, pid));
 
-    // Mark scorebook game as finalized
     const finalized = {
       ...game,
       status: "finalized",
@@ -160,24 +155,29 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
       generatedGameIds: newIndividualGames.map(g => g.id),
     };
 
-    // Save temp roster to the team
     const updatedTeams = db.teams.map(t =>
       t.id === game.teamId
         ? { ...t, tempRoster: game.roster.map(r => ({ playerId: r.playerId, jerseyNumber: r.jerseyNumber })) }
         : t
     );
 
-    // Single atomic update: individual games + finalized scorebook game + temp roster
+    // Mark linked scheduled game as final if present
+    const updatedScheduled = game.scheduledGameId
+      ? (db.scheduledGames || []).map(sg =>
+          sg.id === game.scheduledGameId ? { ...sg, status: "final" } : sg
+        )
+      : (db.scheduledGames || []);
+
     updateDb({
       ...db,
       games: [...newIndividualGames, ...db.games],
       scorebookGames: db.scorebookGames.map(g => g.id === gameId ? finalized : g),
       teams: updatedTeams,
+      scheduledGames: updatedScheduled,
     });
     onExit();
   };
 
-  // Bench players (not on court)
   const benchPlayers = roster.filter(r => !activePlayers.includes(r.playerId));
 
   const periodLabel = game.format.periodType === "quarter" ? `Q${period}` : `H${period}`;
@@ -187,19 +187,19 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
     <div style={{
       height: "100vh", background: T.bg, color: "#e0e0e0",
       fontFamily: "'DM Sans',sans-serif", display: "flex", flexDirection: "column",
-      overflow: "hidden",
+      overflow: "hidden", overscrollBehavior: "none", touchAction: "pan-y",
     }}>
       {/* Game Header */}
       <GameHeader
         periodLabel={periodLabel}
         period={period}
         maxPeriods={maxPeriods}
-        onAdvancePeriod={advancePeriod}
+        onSetPeriod={handleSetPeriod}
         homeScore={teamStats.score}
         awayScore={oppStats.score}
         teamFouls={teamStats.teamFouls}
-        bonusThreshold={game.format.bonusThreshold}
-        doubleBonusThreshold={game.format.doubleBonusThreshold}
+        oppFouls={oppStats.fouls}
+        format={game.format}
         homeTimeouts={timeouts}
         onUndo={undoLast}
         onGroupSub={() => setShowGroupSub(true)}
@@ -233,9 +233,6 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
       {/* Opponent Strip */}
       <OpponentStrip
         opponent={game.opponent}
-        score={oppStats.score}
-        fouls={oppStats.fouls}
-        timeouts={timeouts}
         onScore={(pts) => dispatch(`opp_score_${pts}`)}
         onFoul={() => dispatch("opp_foul")}
         onTechFoul={() => dispatch("opp_tech_foul")}
@@ -275,6 +272,7 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
         <EventLogPanel
           events={events}
           roster={roster}
+          format={game.format}
           onDelete={deleteEvent}
           onClose={() => setShowEventLog(false)}
         />

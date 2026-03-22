@@ -14,6 +14,15 @@ export const createEvent = (type, period, playerId = null, extras = {}) => ({
 
 const activeEvents = (events) => events.filter(e => !e.deleted);
 
+// ── Foul group helper ─────────────────────────────────────────────────────────
+// "quarter" → each period is its own group (resets every quarter)
+// "half" (default) → Q1+Q2 = group 1, Q3+Q4 = group 2
+const getFoulGroup = (period, format) => {
+  if (format?.foulResetPeriod === "quarter") return period;
+  const halfSize = Math.floor((format?.periods || 2) / 2);
+  return period <= halfSize ? 1 : 2;
+};
+
 // ── Player Stats ─────────────────────────────────────────────────────────────
 export const derivePlayerStats = (events, playerId) => {
   const stats = {
@@ -45,14 +54,18 @@ export const derivePlayerStats = (events, playerId) => {
   return stats;
 };
 
-// ── Team Stats (Home) ────────────────────────────────────────────────────────
-export const deriveTeamStats = (events, format) => {
+// ── Team Stats (Home) ─────────────────────────────────────────────────────────
+// displayPeriod: the period currently being displayed (for foul reset scoping).
+// Defaults to getCurrentPeriod(events) if not passed — maintains backward compat.
+export const deriveTeamStats = (events, format, displayPeriod) => {
   const active = activeEvents(events);
   let score = 0;
-  const foulsByPeriod = {};
+  const foulsByGroup = {};
+
+  const currentPer = displayPeriod != null ? displayPeriod : getCurrentPeriod(events);
+  const currentGroup = getFoulGroup(currentPer, format);
 
   for (const e of active) {
-    if (!e.playerId) continue; // skip team-level events for scoring
     switch (e.type) {
       case "2pt_made": score += 2; break;
       case "3pt_made": score += 3; break;
@@ -61,27 +74,26 @@ export const deriveTeamStats = (events, format) => {
       case "technical_foul":
       case "team_tech_foul": {
         const p = e.period || 1;
-        // For bonus tracking, group by half (periods 1-2 = first half, 3-4 = second half)
-        const half = format?.periodType === "quarter" ? (p <= 2 ? 1 : 2) : p;
+        const group = getFoulGroup(p, format);
         const foulVal = (e.type === "technical_foul" || e.type === "team_tech_foul") ? 2 : 1;
-        foulsByPeriod[half] = (foulsByPeriod[half] || 0) + foulVal;
+        foulsByGroup[group] = (foulsByGroup[group] || 0) + foulVal;
         break;
       }
     }
   }
 
-  // Current half's fouls for bonus display
-  const currentPeriod = active.filter(e => e.type === "period_start").length || 1;
-  const currentHalf = format?.periodType === "quarter" ? (currentPeriod <= 2 ? 1 : 2) : currentPeriod;
-  const teamFouls = foulsByPeriod[currentHalf] || 0;
-
-  return { score, teamFouls, foulsByPeriod };
+  const teamFouls = foulsByGroup[currentGroup] || 0;
+  return { score, teamFouls, foulsByGroup };
 };
 
-// ── Opponent Stats ───────────────────────────────────────────────────────────
-export const deriveOpponentStats = (events) => {
+// ── Opponent Stats ────────────────────────────────────────────────────────────
+// displayPeriod: period for foul reset scoping (same half-group logic as home).
+export const deriveOpponentStats = (events, format, displayPeriod) => {
   const active = activeEvents(events);
   let score = 0;
+
+  const currentPer = displayPeriod != null ? displayPeriod : getCurrentPeriod(events);
+  const currentGroup = getFoulGroup(currentPer, format);
   let fouls = 0;
 
   for (const e of active) {
@@ -89,28 +101,46 @@ export const deriveOpponentStats = (events) => {
       case "opp_score_1": score += 1; break;
       case "opp_score_2": score += 2; break;
       case "opp_score_3": score += 3; break;
-      case "opp_foul": fouls++; break;
-      case "opp_tech_foul": fouls += 2; break;
+      case "opp_foul":
+        if (getFoulGroup(e.period || 1, format) === currentGroup) fouls++;
+        break;
+      case "opp_tech_foul":
+        if (getFoulGroup(e.period || 1, format) === currentGroup) fouls += 2;
+        break;
     }
   }
 
   return { score, fouls };
 };
 
-// ── Timeout tracking ─────────────────────────────────────────────────────────
-export const deriveTimeouts = (events, format) => {
+// ── Timeout tracking ──────────────────────────────────────────────────────────
+// displayPeriod: counts only timeouts used in the same half-group as displayPeriod.
+// Resets each half (or each quarter if foulResetPeriod === "quarter").
+export const deriveTimeouts = (events, format, displayPeriod) => {
   const active = activeEvents(events);
-  const homeUsed = active.filter(e => e.type === "timeout_home").length;
-  const awayUsed = active.filter(e => e.type === "timeout_away").length;
+
+  const currentPer = displayPeriod != null ? displayPeriod : getCurrentPeriod(events);
+  const currentGroup = getFoulGroup(currentPer, format);
+
+  const homeUsed = active.filter(
+    e => e.type === "timeout_home" && getFoulGroup(e.period || 1, format) === currentGroup
+  ).length;
+  const awayUsed = active.filter(
+    e => e.type === "timeout_away" && getFoulGroup(e.period || 1, format) === currentGroup
+  ).length;
+
+  // Backward compat: timeoutsPerHalf takes precedence, fall back to homeTimeouts
+  const timeoutsPerHalf = format?.timeoutsPerHalf ?? format?.homeTimeouts ?? 5;
+
   return {
     homeUsed,
     awayUsed,
-    homeRemaining: (format?.homeTimeouts || 5) - homeUsed,
-    awayRemaining: (format?.awayTimeouts || 5) - awayUsed,
+    homeRemaining: timeoutsPerHalf - homeUsed,
+    awayRemaining: timeoutsPerHalf - awayUsed,
   };
 };
 
-// ── Active Players (replay substitutions) ────────────────────────────────────
+// ── Active Players (replay substitutions) ─────────────────────────────────────
 export const getActivePlayers = (events, initialFive) => {
   let current = [...initialFive];
   for (const e of activeEvents(events)) {
@@ -122,7 +152,7 @@ export const getActivePlayers = (events, initialFive) => {
   return current;
 };
 
-// ── Activated Players (ever on court) ────────────────────────────────────────
+// ── Activated Players (ever on court) ─────────────────────────────────────────
 export const getActivatedPlayers = (events, initialFive) => {
   const activated = new Set(initialFive);
   for (const e of activeEvents(events)) {
@@ -131,13 +161,20 @@ export const getActivatedPlayers = (events, initialFive) => {
   return [...activated];
 };
 
-// ── Current Period ───────────────────────────────────────────────────────────
+// ── Current Period ────────────────────────────────────────────────────────────
+// Reads the period from the latest period_change OR period_start event by timestamp.
 export const getCurrentPeriod = (events) => {
-  const starts = activeEvents(events).filter(e => e.type === "period_start");
-  return starts.length > 0 ? Math.max(...starts.map(e => e.period)) : 1;
+  const relevant = activeEvents(events).filter(
+    e => e.type === "period_start" || e.type === "period_change"
+  );
+  if (relevant.length === 0) return 1;
+  const latest = relevant.reduce((a, b) =>
+    new Date(a.timestamp) >= new Date(b.timestamp) ? a : b
+  );
+  return latest.period;
 };
 
-// ── Full Box Score ───────────────────────────────────────────────────────────
+// ── Full Box Score ────────────────────────────────────────────────────────────
 export const deriveBoxScore = (events, roster) => {
   return roster.map(r => ({
     ...r,
@@ -145,7 +182,7 @@ export const deriveBoxScore = (events, roster) => {
   }));
 };
 
-// ── Format Event for Display ─────────────────────────────────────────────────
+// ── Format Event for Display ──────────────────────────────────────────────────
 export const formatEventDescription = (event, roster) => {
   const player = roster.find(r => r.playerId === event.playerId);
   const tag = player ? `#${player.jerseyNumber} ${player.name}` : "";
@@ -177,12 +214,13 @@ export const formatEventDescription = (event, roster) => {
     "timeout_away": "Away Timeout",
     "period_start": `Period ${event.period} Start`,
     "period_end": `Period ${event.period} End`,
+    "period_change": `Period ${event.period}`,
   };
 
   return labels[event.type] || event.type;
 };
 
-// ── Convert to Individual Game Record ────────────────────────────────────────
+// ── Convert to Individual Game Record ─────────────────────────────────────────
 export const convertToIndividualGame = (scorebookGame, playerId) => {
   const stats = derivePlayerStats(scorebookGame.events, playerId);
   return {

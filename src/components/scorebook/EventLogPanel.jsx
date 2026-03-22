@@ -1,9 +1,13 @@
 import { T } from "../../utils/constants";
 import { formatEventDescription } from "../../utils/scorebookEngine";
 
-export default function EventLogPanel({ events, roster, onDelete, onClose }) {
-  // Show in reverse chronological order
+export default function EventLogPanel({ events, roster, format, onDelete, onClose }) {
   const sorted = [...events].reverse();
+
+  const periodLabel = (period) => {
+    if (format?.periodType === "quarter") return `Q${period}`;
+    return `H${period}`;
+  };
 
   return (
     <div style={{
@@ -33,9 +37,9 @@ export default function EventLogPanel({ events, roster, onDelete, onClose }) {
             opacity: e.deleted ? 0.3 : 1,
           }}>
             <div style={{
-              fontSize: 10, fontWeight: 700, color: T.orange,
-              fontFamily: "'DM Mono',monospace", minWidth: 24,
-            }}>P{e.period}</div>
+              fontSize: 11, fontWeight: 700, color: T.orange,
+              fontFamily: "'DM Mono',monospace", minWidth: 28, flexShrink: 0,
+            }}>{periodLabel(e.period || 1)}</div>
             <div style={{ flex: 1 }}>
               <div style={{
                 fontSize: 13, color: e.deleted ? "#555" : "#ddd", fontWeight: 600,
