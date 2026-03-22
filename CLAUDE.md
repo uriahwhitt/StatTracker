@@ -129,3 +129,14 @@ Before declaring any task complete, run:
 npm run build
 ```
 The build must exit with code 0 (warnings about chunk size are acceptable — jspdf and firebase are large).
+
+---
+
+## PWA / Service Worker
+
+This app installs as a PWA. The service worker aggressively caches assets, which means:
+
+- After significant code changes, the old service worker may serve a stale build even after restarting `npm run dev`.
+- If the app behaves unexpectedly after a major update, instruct the user to unregister the service worker:
+  `DevTools → Application → Service Workers → Unregister`, then hard refresh.
+- Never assume a blank screen or stale UI is a code bug until the service worker has been cleared.
