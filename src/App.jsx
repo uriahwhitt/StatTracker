@@ -11,6 +11,7 @@ import TournamentView from "./components/tournament/TournamentView";
 import ReportsView from "./components/reports/ReportsView";
 import ManageView from "./components/manage/ManageView";
 import ScorebookView from "./components/scorebook/ScorebookView";
+import SettingsView from "./components/settings/SettingsView";
 
 // ── One-time data migration (v3) ──────────────────────────────────────────────
 const runMigrationV3 = () => {
@@ -279,7 +280,7 @@ export default function App() {
         @keyframes fadeUp { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-18px); } }
       `}</style>
 
-      {!hideChrome && <Header db={db} activePlayerId={activePlayerId} setActivePlayer={setActivePlayer} view={view} stats={stats} />}
+      {!hideChrome && <Header db={db} activePlayerId={activePlayerId} setActivePlayer={setActivePlayer} view={view} stats={stats} setView={navTo} />}
 
       <div style={{ padding: hideChrome ? 0 : "0 16px" }}>
         {view === "tracker" && (
@@ -316,6 +317,10 @@ export default function App() {
 
         {view === "manage" && (
           <ManageView db={db} updateDb={updateDb} />
+        )}
+
+        {view === "settings" && (
+          <SettingsView db={db} />
         )}
       </div>
 
