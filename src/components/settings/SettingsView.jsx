@@ -6,6 +6,7 @@ import {
   createTransferCode,
   deleteTransferCode,
   redeemTransferCode,
+  refreshFromSource,
   formatCode,
 } from "../../utils/transferCode";
 import { version } from "../../../package.json";
@@ -249,13 +250,45 @@ function LinkingModal({ onClose }) {
   );
 }
 
+// ── Sync timestamp formatter — "Mar 22 at 9:41 AM" ───────────────────────────
+const fmtSyncTime = (isoStr) => {
+  if (!isoStr) return null;
+  const d = new Date(isoStr);
+  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `${date} at ${time}`;
+};
+
 // ── Main SettingsView ─────────────────────────────────────────────────────────
 export default function SettingsView({ db }) {
-  const [linkModalOpen, setLinkModalOpen]       = useState(false);
-  const [confirmClear, setConfirmClear]         = useState(false);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [confirmClear, setConfirmClear]   = useState(false);
+
+  // Linked device state
+  const linkedFromUid                     = localStorage.getItem('linked_from_uid');
+  const [lastSyncAt, setLastSyncAt]       = useState(() => localStorage.getItem('last_sync_at'));
+  const [confirmRefresh, setConfirmRefresh] = useState(false);
+  const [syncing, setSyncing]             = useState(false);
+  const [syncError, setSyncError]         = useState(null);
+  const [syncSuccess, setSyncSuccess]     = useState(false);
 
   const uid = getCurrentUid() || auth.currentUser?.uid || "";
   const shortUid = uid ? `${uid.slice(0, 8)}…` : "—";
+
+  const handleRefresh = async () => {
+    setSyncing(true);
+    setSyncError(null);
+    setConfirmRefresh(false);
+    try {
+      await refreshFromSource(uid);
+      setLastSyncAt(localStorage.getItem('last_sync_at'));
+      setSyncSuccess(true);
+      setTimeout(() => window.location.reload(), 2000);
+    } catch (e) {
+      setSyncError("Sync failed — make sure the source device has been used recently.");
+      setSyncing(false);
+    }
+  };
 
   const handleExportAll = () => {
     const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
@@ -279,23 +312,87 @@ export default function SettingsView({ db }) {
       {/* ── Device & Sync ──────────────────────────────────────────────────── */}
       <SectionLabel label="Device & Sync" />
       <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        {/* Device ID row + status badge */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
           <div>
             <div style={{ fontSize: 10, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Device ID</div>
             <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 13, color: "#444" }}>{shortUid}</div>
+            {linkedFromUid && (
+              <div style={{ fontSize: 11, color: "#444", marginTop: 4 }}>
+                {lastSyncAt
+                  ? `Last synced: ${fmtSyncTime(lastSyncAt)}`
+                  : "Synced at link time"}
+              </div>
+            )}
           </div>
           <div style={{
-            fontSize: 10, fontWeight: 700, color: T.green,
-            background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)",
-            borderRadius: 20, padding: "3px 10px", textTransform: "uppercase",
-          }}>Active</div>
+            fontSize: 10, fontWeight: 700,
+            color: linkedFromUid ? T.blue : T.green,
+            background: linkedFromUid ? "rgba(59,130,246,0.1)" : "rgba(34,197,94,0.1)",
+            border: `1px solid ${linkedFromUid ? "rgba(59,130,246,0.25)" : "rgba(34,197,94,0.25)"}`,
+            borderRadius: 20, padding: "3px 10px", textTransform: "uppercase", flexShrink: 0,
+          }}>{linkedFromUid ? "Linked" : "Active"}</div>
         </div>
-        <button onClick={() => setLinkModalOpen(true)} style={{
-          width: "100%", padding: "11px", borderRadius: 10, fontSize: 13,
-          fontWeight: 700, cursor: "pointer",
-          background: "rgba(249,115,22,0.15)", border: `1px solid rgba(249,115,22,0.35)`,
-          color: T.orange,
-        }}>Link a device</button>
+
+        {/* Feedback messages */}
+        {syncSuccess && (
+          <div style={{ fontSize: 12, color: T.green, marginBottom: 10, fontWeight: 600 }}>
+            Synced successfully — reloading…
+          </div>
+        )}
+        {syncError && (
+          <div style={{ fontSize: 12, color: T.red, marginBottom: 10, lineHeight: 1.4 }}>
+            {syncError}
+          </div>
+        )}
+
+        {/* Confirm refresh prompt */}
+        {confirmRefresh && (
+          <div style={{
+            background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)",
+            borderRadius: 10, padding: "12px", marginBottom: 10,
+          }}>
+            <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.5, marginBottom: 10 }}>
+              This will overwrite your local data with the latest from the source device. Your current data will be replaced. Continue?
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={handleRefresh} style={{
+                flex: 1, padding: "9px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                background: "rgba(59,130,246,0.2)", border: "1px solid rgba(59,130,246,0.4)",
+                color: T.blue, cursor: "pointer",
+              }}>Yes, sync now</button>
+              <button onClick={() => setConfirmRefresh(false)} style={{
+                flex: 1, padding: "9px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`,
+                color: "#555", cursor: "pointer",
+              }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* Buttons */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setLinkModalOpen(true)} style={{
+            flex: 1, padding: "11px", borderRadius: 10, fontSize: 13,
+            fontWeight: 700, cursor: "pointer",
+            background: "rgba(249,115,22,0.15)", border: `1px solid rgba(249,115,22,0.35)`,
+            color: T.orange,
+          }}>Link a device</button>
+
+          {linkedFromUid && (
+            <button
+              onClick={() => { setSyncError(null); setConfirmRefresh(true); }}
+              disabled={syncing || syncSuccess}
+              style={{
+                flex: 1, padding: "11px", borderRadius: 10, fontSize: 13,
+                fontWeight: 700, cursor: syncing || syncSuccess ? "default" : "pointer",
+                background: syncing || syncSuccess ? "rgba(255,255,255,0.04)" : "rgba(59,130,246,0.15)",
+                border: `1px solid ${syncing || syncSuccess ? T.border : "rgba(59,130,246,0.35)"}`,
+                color: syncing || syncSuccess ? "#333" : T.blue,
+              }}
+            >{syncing ? "Syncing…" : "Refresh from source"}</button>
+          )}
+        </div>
       </Card>
 
       {/* ── Account (Phase 2 placeholder) ─────────────────────────────────── */}

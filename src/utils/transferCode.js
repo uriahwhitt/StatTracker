@@ -110,3 +110,34 @@ export const deleteTransferCode = async (code) => {
   const ref = doc(firestoreDb, 'transferCodes', code);
   await deleteDoc(ref);
 };
+
+// ── Device B: refresh from source (re-copy data from linked device) ───────────
+// Requires linked_from_uid to be set in localStorage (written during redemption).
+// Returns the new db data so the caller can update React state if available;
+// falls back to window.location.reload() if state update isn't plumbed through.
+export const refreshFromSource = async (currentUid) => {
+  const sourceUid = localStorage.getItem('linked_from_uid');
+  if (!sourceUid) throw new Error('No source device linked.');
+
+  // Read source device's current Firestore data
+  const sourceRef = doc(firestoreDb, `users/${sourceUid}/data/db`);
+  const sourceSnap = await getDoc(sourceRef);
+
+  if (!sourceSnap.exists()) {
+    throw new Error('Could not reach source device data. Make sure the source device has been used recently.');
+  }
+
+  const newData = sourceSnap.data();
+
+  // Overwrite this device's Firestore document
+  const destRef = doc(firestoreDb, `users/${currentUid}/data/db`);
+  await setDoc(destRef, newData);
+
+  // Update localStorage cache
+  try { localStorage.setItem('bball_tracker_v2', JSON.stringify(newData)); } catch { /* quota */ }
+
+  // Record sync timestamp
+  localStorage.setItem('last_sync_at', new Date().toISOString());
+
+  return newData;
+};
