@@ -1,28 +1,17 @@
 // ── Storage — Firebase Firestore backend (Phase 1.5) ─────────────────────────
-// Interface: loadDb / persist / loadActivePlayer / persistActivePlayer
-// All React components and utilities use these four functions only.
+// Interface: loadDb / persist / loadActivePlayer / persistActivePlayer / getCurrentUid
+// All React components and utilities use these functions only.
+//
+// Firebase is initialized once in src/firebase.js. This module imports from
+// there to avoid duplicate-app errors.
 
-import { initializeApp } from "firebase/app";
-import { initializeFirestore, persistentLocalCache, doc, getDoc, setDoc } from "firebase/firestore";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { db as firestoreDb, auth } from '../firebase';
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 const LEGACY_KEY  = "bball_tracker_v2";
 const PLAYER_KEY  = "bball_active_player";
 const FIRESTORE_PATH = (uid) => `users/${uid}/data/db`;
-
-// ── Firebase init ─────────────────────────────────────────────────────────────
-const firebaseConfig = {
-  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
-};
-
-const app      = initializeApp(firebaseConfig);
-const firestoreDb = initializeFirestore(app, { localCache: persistentLocalCache() });
-const auth     = getAuth(app);
 
 // Module-scoped uid — set once anonymous sign-in resolves
 let uid = null;
@@ -45,6 +34,9 @@ const getUid = () => {
   return uidReady;
 };
 
+// Expose UID for components that need it (e.g. Settings device ID display)
+export const getCurrentUid = () => uid;
+
 // ── Default shape ─────────────────────────────────────────────────────────────
 const defaultDb = () => ({
   games: [], tournaments: [], players: [],
@@ -60,7 +52,6 @@ export const loadDb = async () => {
 
     if (snap.exists()) {
       const data = snap.data();
-      // Merge with defaults so any missing collection still returns []
       return { ...defaultDb(), ...data };
     }
 
@@ -79,7 +70,6 @@ export const loadDb = async () => {
     return fresh;
   } catch (err) {
     console.error("loadDb error:", err);
-    // Fall back to localStorage if Firestore fails
     try {
       const raw = JSON.parse(localStorage.getItem(LEGACY_KEY)) || {};
       return { ...defaultDb(), ...raw };
@@ -91,7 +81,6 @@ export const loadDb = async () => {
 
 // ── persist ───────────────────────────────────────────────────────────────────
 export const persist = async (db) => {
-  // Also write localStorage as offline cache / backup
   try { localStorage.setItem(LEGACY_KEY, JSON.stringify(db)); } catch { /* quota */ }
 
   try {
@@ -103,6 +92,6 @@ export const persist = async (db) => {
   }
 };
 
-// ── Active player (stays in localStorage — no need for Firestore) ─────────────
+// ── Active player (stays in localStorage) ────────────────────────────────────
 export const loadActivePlayer = () => localStorage.getItem(PLAYER_KEY) || "";
 export const persistActivePlayer = (id) => localStorage.setItem(PLAYER_KEY, id);

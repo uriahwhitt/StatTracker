@@ -1,7 +1,14 @@
 import { T } from "../../utils/constants";
 import { calcPoints } from "../../utils/stats";
 
-export default function Header({ db, activePlayerId, setActivePlayer, view, stats }) {
+const GearIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+  </svg>
+);
+
+export default function Header({ db, activePlayerId, setActivePlayer, view, stats, setView }) {
   return (
     <div style={{
       background: "linear-gradient(160deg, #0e0e1c 0%, #16082a 100%)",
@@ -12,7 +19,7 @@ export default function Header({ db, activePlayerId, setActivePlayer, view, stat
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 26 }}>🏀</span>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 19, fontWeight: 900, color: "#fff", letterSpacing: "-0.03em" }}>StatTracker</div>
+          <div style={{ fontSize: 19, fontWeight: 900, color: "#fff", letterSpacing: "-0.03em" }}>WE TRACK</div>
           <div style={{ fontSize: 10, color: T.orange, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase" }}>Game Log</div>
         </div>
         {db.players.length > 0 && (
@@ -29,6 +36,18 @@ export default function Header({ db, activePlayerId, setActivePlayer, view, stat
             <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.7 }}>PTS</span>
           </div>
         )}
+        <button
+          onClick={() => setView("settings")}
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            color: view === "settings" ? T.orange : "#555",
+            padding: "4px", display: "flex", alignItems: "center",
+            transition: "color 0.15s",
+          }}
+          aria-label="Settings"
+        >
+          <GearIcon />
+        </button>
       </div>
     </div>
   );
