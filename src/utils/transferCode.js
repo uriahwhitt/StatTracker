@@ -12,15 +12,24 @@
 // after linking are NOT reflected on Device B and vice versa. Real-time
 // multi-device sync requires proper authentication (Phase 2 — Google Sign-in).
 //
-// FIRESTORE SECURITY RULES REQUIRED:
+// FIRESTORE SECURITY RULES (as deployed):
+//
+//   match /users/{userId}/data/db {
+//     allow read, write: if request.auth != null && request.auth.uid == userId;
+//   }
 //   match /transferCodes/{code} {
 //     allow create: if request.auth != null;
-//     allow read, delete: if request.auth != null;   // any authed user can read/redeem
+//     allow read:   if request.auth != null;                              // any authed user can redeem
+//     allow delete: if request.auth != null && resource.data.uid == request.auth.uid;  // owner only
 //   }
 //   match /users/{userId}/data/db {
-//     allow read: if request.auth != null;           // needed for data copy
-//     allow write: if request.auth.uid == userId;
+//     allow read: if request.auth != null;                               // any authed user can copy data
 //   }
+//
+// BEHAVIORAL NOTE: Device B cannot delete the transfer code after redeeming it
+// (delete is owner-only and Device B's UID ≠ code creator's UID). The deleteDoc
+// call in redeemTransferCode will fail silently via .catch(() => {}). This is
+// acceptable — the code expires naturally after 10 minutes regardless.
 
 import { db as firestoreDb } from '../firebase';
 import { doc, setDoc, getDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
