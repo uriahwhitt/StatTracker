@@ -240,11 +240,6 @@ export default function App() {
     setSelectedGame(prev => prev ? { ...prev, tournamentId: newTid || null } : null);
   };
 
-  // Filter helpers
-  const playerGames = db.games.filter(g => g.playerId === activePlayerId || (!g.playerId && activePlayerId === "default"));
-  const tournamentGames = (tid) => playerGames.filter(g => g.tournamentId === tid);
-  const activePlayer = db.players.find(p => p.id === activePlayerId);
-
   const [scorebookLive, setScorebookLive] = useState(false);
 
   const navTo = (v) => { setView(v); setSelectedGame(null); setSelectedTournament(null); if (v !== "tracker") { setEditingGameId(null); } };
@@ -260,6 +255,11 @@ export default function App() {
       </div>
     );
   }
+
+  // Filter helpers — only safe to compute once db is loaded
+  const playerGames = db.games.filter(g => g.playerId === activePlayerId || (!g.playerId && activePlayerId === "default"));
+  const tournamentGames = (tid) => playerGames.filter(g => g.tournamentId === tid);
+  const activePlayer = db.players.find(p => p.id === activePlayerId);
 
   const hideChrome = view === "scorebook" && scorebookLive;
 
