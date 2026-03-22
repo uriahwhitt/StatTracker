@@ -516,6 +516,24 @@ Work through these items sequentially. Complete and verify each before starting 
 - Future: game-by-game trend charts, tournament-only stat filters, comparison to team averages.
 - The `phase` and `bracketName` fields on individual games enable tournament-only stat isolation today.
 
+### 11.5 Role-Based Access Model (Phase 2)
+
+When Google OAuth is implemented, enforce the following role model
+via Firestore security rules and UI-level route guards:
+
+| Role        | Manage | Scorebook | History | Reports |
+|-------------|--------|-----------|---------|---------|
+| Org Admin   | full   | full      | full    | full    |
+| Coach       | none   | view only | full    | full    |
+| Parent      | none   | none      | own     | own     |
+| Score Table | none   | input     | none    | none    |
+
+Roles are stored per user per org in Firestore at:
+`users/{uid}/roles/{orgId} = { role: "admin" | "coach" | "parent" | "scoretable" }`
+
+Transfer codes go away entirely when OAuth is live —
+replaced by invitation flow in the Manage tab.
+
 ---
 
 ## 12. File Change Summary
