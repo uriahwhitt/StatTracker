@@ -1,7 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { T } from "../../utils/constants";
 import { auth } from "../../firebase";
-import { getCurrentUid } from "../../utils/storage";
+import { getCurrentUid, invalidatePathCache } from "../../utils/storage";
+import {
+  signInWithGoogle,
+  signInWithExistingAccount,
+  signOutUser,
+  useAuthUser,
+} from "../../utils/auth";
 import {
   createTransferCode,
   deleteTransferCode,
@@ -47,6 +53,35 @@ function ActionBtn({ label, color = T.orange, onClick, destructive }) {
   );
 }
 
+// ── Google sign-in button ─────────────────────────────────────────────────────
+function GoogleSignInButton({ onClick, loading }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading}
+      style={{
+        width: "100%", padding: "13px 16px", borderRadius: 10,
+        fontSize: 14, fontWeight: 700, cursor: loading ? "default" : "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+        background: loading ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.08)",
+        border: `1px solid ${loading ? T.border : "rgba(255,255,255,0.2)"}`,
+        color: loading ? "#444" : "#fff",
+        transition: "background 0.15s",
+      }}
+    >
+      {!loading && (
+        <svg width="18" height="18" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+      )}
+      {loading ? "Signing in…" : "Sign in with Google"}
+    </button>
+  );
+}
+
 // ── Device linking modal ──────────────────────────────────────────────────────
 function LinkingModal({ onClose }) {
   const [step, setStep] = useState("choice"); // choice | share | enter
@@ -66,7 +101,6 @@ function LinkingModal({ onClose }) {
       setCountdown(c => {
         if (c <= 1) {
           clearInterval(timerRef.current);
-          // Code expired — close
           onClose();
           return 0;
         }
@@ -106,7 +140,6 @@ function LinkingModal({ onClose }) {
       if (!uid) throw new Error("Not signed in. Please restart the app.");
       await redeemTransferCode(enteredCode, uid);
       setSuccess(true);
-      // Short delay so user sees success message, then reload
       setTimeout(() => window.location.reload(), 1500);
     } catch (e) {
       setError(e.message);
@@ -261,16 +294,25 @@ const fmtSyncTime = (isoStr) => {
 
 // ── Main SettingsView ─────────────────────────────────────────────────────────
 export default function SettingsView({ db }) {
-  const [linkModalOpen, setLinkModalOpen] = useState(false);
-  const [confirmClear, setConfirmClear]   = useState(false);
+  const user = useAuthUser();
+  const isAuthenticated = user && !user.isAnonymous;
 
-  // Linked device state
-  const linkedFromUid                     = localStorage.getItem('linked_from_uid');
-  const [lastSyncAt, setLastSyncAt]       = useState(() => localStorage.getItem('last_sync_at'));
+  const [linkModalOpen, setLinkModalOpen]   = useState(false);
+  const [confirmClear, setConfirmClear]     = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+
+  // Sign-in state
+  const [signingIn, setSigningIn]           = useState(false);
+  const [signInError, setSignInError]       = useState(null);
+  const [pendingCredential, setPendingCredential] = useState(null); // conflict case
+
+  // Linked device state (anonymous only)
+  const linkedFromUid                       = localStorage.getItem('linked_from_uid');
+  const [lastSyncAt, setLastSyncAt]         = useState(() => localStorage.getItem('last_sync_at'));
   const [confirmRefresh, setConfirmRefresh] = useState(false);
-  const [syncing, setSyncing]             = useState(false);
-  const [syncError, setSyncError]         = useState(null);
-  const [syncSuccess, setSyncSuccess]     = useState(false);
+  const [syncing, setSyncing]               = useState(false);
+  const [syncError, setSyncError]           = useState(null);
+  const [syncSuccess, setSyncSuccess]       = useState(false);
 
   const uid = getCurrentUid() || auth.currentUser?.uid || "";
   const shortUid = uid ? `${uid.slice(0, 8)}…` : "—";
@@ -284,10 +326,54 @@ export default function SettingsView({ db }) {
       setLastSyncAt(localStorage.getItem('last_sync_at'));
       setSyncSuccess(true);
       setTimeout(() => window.location.reload(), 2000);
-    } catch (e) {
+    } catch {
       setSyncError("Sync failed — make sure the source device has been used recently.");
       setSyncing(false);
     }
+  };
+
+  const handleSignIn = async () => {
+    setSigningIn(true);
+    setSignInError(null);
+    setPendingCredential(null);
+    try {
+      const result = await signInWithGoogle();
+      if (result.cancelled) {
+        // User closed popup — no action needed
+      } else if (result.conflict) {
+        // Google account belongs to a different Firebase UID
+        setPendingCredential(result.credential);
+      }
+      // On success (result.user), the auth state listener in useAuthUser
+      // will update automatically — no extra action needed
+    } catch (err) {
+      setSignInError(err.message || "Sign-in failed. Please try again.");
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
+  const handleSignInInstead = async () => {
+    if (!pendingCredential) return;
+    setSigningIn(true);
+    setSignInError(null);
+    try {
+      invalidatePathCache();
+      await signInWithExistingAccount(pendingCredential);
+      setPendingCredential(null);
+      // Reload so Firestore data from the existing account loads
+      window.location.reload();
+    } catch (err) {
+      setSignInError(err.message || "Sign-in failed. Please try again.");
+      setSigningIn(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    invalidatePathCache();
+    await signOutUser();
+    setConfirmSignOut(false);
+    window.location.reload();
   };
 
   const handleExportAll = () => {
@@ -309,108 +395,200 @@ export default function SettingsView({ db }) {
     <div style={{ marginTop: 16, paddingBottom: 32 }}>
       <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 4 }}>Settings</div>
 
-      {/* ── Device & Sync ──────────────────────────────────────────────────── */}
-      <SectionLabel label="Device & Sync" />
-      <Card>
-        {/* Device ID row + status badge */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-          <div>
-            <div style={{ fontSize: 10, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Device ID</div>
-            <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 13, color: "#444" }}>{shortUid}</div>
-            {linkedFromUid && (
-              <div style={{ fontSize: 11, color: "#444", marginTop: 4 }}>
-                {lastSyncAt
-                  ? `Last synced: ${fmtSyncTime(lastSyncAt)}`
-                  : "Synced at link time"}
+      {/* ── Account ──────────────────────────────────────────────────────── */}
+      <SectionLabel label="Account" />
+
+      {isAuthenticated ? (
+        /* ── Authenticated state ─── */
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Profile card */}
+          <Card>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              {user.photoURL ? (
+                <img
+                  src={user.photoURL}
+                  alt={user.displayName || ""}
+                  style={{ width: 48, height: 48, borderRadius: "50%", flexShrink: 0, border: `2px solid ${T.border}` }}
+                />
+              ) : (
+                <div style={{
+                  width: 48, height: 48, borderRadius: "50%", flexShrink: 0,
+                  background: "rgba(249,115,22,0.2)", display: "flex", alignItems: "center",
+                  justifyContent: "center", fontSize: 20, fontWeight: 900, color: T.orange,
+                }}>
+                  {(user.displayName || "?")[0].toUpperCase()}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {user.displayName || "Google Account"}
+                </div>
+                <div style={{ fontSize: 12, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {user.email}
+                </div>
               </div>
-            )}
-          </div>
-          <div style={{
-            fontSize: 10, fontWeight: 700,
-            color: linkedFromUid ? T.blue : T.green,
-            background: linkedFromUid ? "rgba(59,130,246,0.1)" : "rgba(34,197,94,0.1)",
-            border: `1px solid ${linkedFromUid ? "rgba(59,130,246,0.25)" : "rgba(34,197,94,0.25)"}`,
-            borderRadius: 20, padding: "3px 10px", textTransform: "uppercase", flexShrink: 0,
-          }}>{linkedFromUid ? "Linked" : "Active"}</div>
-        </div>
-
-        {/* Feedback messages */}
-        {syncSuccess && (
-          <div style={{ fontSize: 12, color: T.green, marginBottom: 10, fontWeight: 600 }}>
-            Synced successfully — reloading…
-          </div>
-        )}
-        {syncError && (
-          <div style={{ fontSize: 12, color: T.red, marginBottom: 10, lineHeight: 1.4 }}>
-            {syncError}
-          </div>
-        )}
-
-        {/* Confirm refresh prompt */}
-        {confirmRefresh && (
-          <div style={{
-            background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)",
-            borderRadius: 10, padding: "12px", marginBottom: 10,
-          }}>
-            <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.5, marginBottom: 10 }}>
-              This will overwrite your local data with the latest from the source device. Your current data will be replaced. Continue?
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={handleRefresh} style={{
-                flex: 1, padding: "9px", borderRadius: 8, fontSize: 12, fontWeight: 700,
-                background: "rgba(59,130,246,0.2)", border: "1px solid rgba(59,130,246,0.4)",
-                color: T.blue, cursor: "pointer",
-              }}>Yes, sync now</button>
-              <button onClick={() => setConfirmRefresh(false)} style={{
-                flex: 1, padding: "9px", borderRadius: 8, fontSize: 12, fontWeight: 700,
-                background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`,
-                color: "#555", cursor: "pointer",
-              }}>Cancel</button>
+          </Card>
+
+          {/* My Teams (placeholder) */}
+          <Card>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#ccc", marginBottom: 8 }}>My Teams</div>
+            <div style={{ fontSize: 12, color: "#444", lineHeight: 1.5 }}>
+              No team memberships yet. Ask your coach for a join code to get started.
             </div>
-          </div>
-        )}
+          </Card>
 
-        {/* Buttons */}
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setLinkModalOpen(true)} style={{
-            flex: 1, padding: "11px", borderRadius: 10, fontSize: 13,
-            fontWeight: 700, cursor: "pointer",
-            background: "rgba(249,115,22,0.15)", border: `1px solid rgba(249,115,22,0.35)`,
-            color: T.orange,
-          }}>Link a device</button>
-
-          {linkedFromUid && (
-            <button
-              onClick={() => { setSyncError(null); setConfirmRefresh(true); }}
-              disabled={syncing || syncSuccess}
-              style={{
-                flex: 1, padding: "11px", borderRadius: 10, fontSize: 13,
-                fontWeight: 700, cursor: syncing || syncSuccess ? "default" : "pointer",
-                background: syncing || syncSuccess ? "rgba(255,255,255,0.04)" : "rgba(59,130,246,0.15)",
-                border: `1px solid ${syncing || syncSuccess ? T.border : "rgba(59,130,246,0.35)"}`,
-                color: syncing || syncSuccess ? "#333" : T.blue,
-              }}
-            >{syncing ? "Syncing…" : "Refresh from source"}</button>
+          {/* Sign out */}
+          {confirmSignOut ? (
+            <Card style={{ border: "1px solid rgba(239,68,68,0.3)" }}>
+              <div style={{ fontSize: 13, color: "#aaa", lineHeight: 1.5, marginBottom: 12 }}>
+                Sign out of your Google account? You'll continue as an anonymous user on this device.
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={handleSignOut} style={{
+                  flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)",
+                  color: T.red, cursor: "pointer",
+                }}>Sign out</button>
+                <button onClick={() => setConfirmSignOut(false)} style={{
+                  flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`,
+                  color: "#555", cursor: "pointer",
+                }}>Cancel</button>
+              </div>
+            </Card>
+          ) : (
+            <ActionBtn label="Sign out" destructive onClick={() => setConfirmSignOut(true)} />
           )}
         </div>
-      </Card>
-
-      {/* ── Account (Phase 2 placeholder) ─────────────────────────────────── */}
-      <SectionLabel label="Account" />
-      <Card style={{ opacity: 0.5, pointerEvents: "none" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-          </svg>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#ccc" }}>Google Sign-in coming soon</div>
-            <div style={{ fontSize: 12, color: "#555", marginTop: 3, lineHeight: 1.4 }}>
-              Sign in with your Google account to access your data from any device without transfer codes.
+      ) : (
+        /* ── Anonymous state ─── */
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* CTA banner */}
+          <Card style={{ border: "1px solid rgba(249,115,22,0.2)", background: "rgba(249,115,22,0.06)" }}>
+            <div style={{ fontSize: 13, color: "#ccc", lineHeight: 1.55 }}>
+              Sign in with Google to join teams, sync across devices, and access live game feeds.
             </div>
-          </div>
+          </Card>
+
+          {/* Conflict resolution */}
+          {pendingCredential && (
+            <Card style={{ border: "1px solid rgba(59,130,246,0.3)" }}>
+              <div style={{ fontSize: 13, color: "#aaa", lineHeight: 1.5, marginBottom: 12 }}>
+                This Google account is already linked to another device. Sign in with that account instead? Your data on this device will be replaced.
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={handleSignInInstead} disabled={signingIn} style={{
+                  flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  background: "rgba(59,130,246,0.2)", border: "1px solid rgba(59,130,246,0.4)",
+                  color: T.blue, cursor: "pointer",
+                }}>{signingIn ? "Signing in…" : "Sign in instead"}</button>
+                <button onClick={() => setPendingCredential(null)} style={{
+                  flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`,
+                  color: "#555", cursor: "pointer",
+                }}>Cancel</button>
+              </div>
+            </Card>
+          )}
+
+          {signInError && (
+            <div style={{ fontSize: 12, color: T.red, lineHeight: 1.4 }}>{signInError}</div>
+          )}
+
+          <GoogleSignInButton onClick={handleSignIn} loading={signingIn} />
         </div>
-      </Card>
+      )}
+
+      {/* ── Device & Sync (anonymous only — authenticated users don't need transfer codes) */}
+      {!isAuthenticated && (
+        <>
+          <SectionLabel label="Device & Sync" />
+          <Card>
+            {/* Device ID row + status badge */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Device ID</div>
+                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 13, color: "#444" }}>{shortUid}</div>
+                {linkedFromUid && (
+                  <div style={{ fontSize: 11, color: "#444", marginTop: 4 }}>
+                    {lastSyncAt
+                      ? `Last synced: ${fmtSyncTime(lastSyncAt)}`
+                      : "Synced at link time"}
+                  </div>
+                )}
+              </div>
+              <div style={{
+                fontSize: 10, fontWeight: 700,
+                color: linkedFromUid ? T.blue : T.green,
+                background: linkedFromUid ? "rgba(59,130,246,0.1)" : "rgba(34,197,94,0.1)",
+                border: `1px solid ${linkedFromUid ? "rgba(59,130,246,0.25)" : "rgba(34,197,94,0.25)"}`,
+                borderRadius: 20, padding: "3px 10px", textTransform: "uppercase", flexShrink: 0,
+              }}>{linkedFromUid ? "Linked" : "Active"}</div>
+            </div>
+
+            {/* Feedback messages */}
+            {syncSuccess && (
+              <div style={{ fontSize: 12, color: T.green, marginBottom: 10, fontWeight: 600 }}>
+                Synced successfully — reloading…
+              </div>
+            )}
+            {syncError && (
+              <div style={{ fontSize: 12, color: T.red, marginBottom: 10, lineHeight: 1.4 }}>
+                {syncError}
+              </div>
+            )}
+
+            {/* Confirm refresh prompt */}
+            {confirmRefresh && (
+              <div style={{
+                background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)",
+                borderRadius: 10, padding: "12px", marginBottom: 10,
+              }}>
+                <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.5, marginBottom: 10 }}>
+                  This will overwrite your local data with the latest from the source device. Your current data will be replaced. Continue?
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={handleRefresh} style={{
+                    flex: 1, padding: "9px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                    background: "rgba(59,130,246,0.2)", border: "1px solid rgba(59,130,246,0.4)",
+                    color: T.blue, cursor: "pointer",
+                  }}>Yes, sync now</button>
+                  <button onClick={() => setConfirmRefresh(false)} style={{
+                    flex: 1, padding: "9px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                    background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`,
+                    color: "#555", cursor: "pointer",
+                  }}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Buttons */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setLinkModalOpen(true)} style={{
+                flex: 1, padding: "11px", borderRadius: 10, fontSize: 13,
+                fontWeight: 700, cursor: "pointer",
+                background: "rgba(249,115,22,0.15)", border: `1px solid rgba(249,115,22,0.35)`,
+                color: T.orange,
+              }}>Link a device</button>
+
+              {linkedFromUid && (
+                <button
+                  onClick={() => { setSyncError(null); setConfirmRefresh(true); }}
+                  disabled={syncing || syncSuccess}
+                  style={{
+                    flex: 1, padding: "11px", borderRadius: 10, fontSize: 13,
+                    fontWeight: 700, cursor: syncing || syncSuccess ? "default" : "pointer",
+                    background: syncing || syncSuccess ? "rgba(255,255,255,0.04)" : "rgba(59,130,246,0.15)",
+                    border: `1px solid ${syncing || syncSuccess ? T.border : "rgba(59,130,246,0.35)"}`,
+                    color: syncing || syncSuccess ? "#333" : T.blue,
+                  }}
+                >{syncing ? "Syncing…" : "Refresh from source"}</button>
+              )}
+            </div>
+          </Card>
+        </>
+      )}
 
       {/* ── About ─────────────────────────────────────────────────────────── */}
       <SectionLabel label="About" />

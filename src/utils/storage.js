@@ -1,4 +1,4 @@
-// ── Storage — Firebase Firestore backend (Phase 1.5) ─────────────────────────
+// ── Storage — Firebase Firestore backend (Phase 1.5 / Phase 2) ───────────────
 // Interface: loadDb / persist / loadActivePlayer / persistActivePlayer / getCurrentUid
 // All React components and utilities use these functions only.
 //
@@ -6,12 +6,11 @@
 // there to avoid duplicate-app errors.
 
 import { db as firestoreDb, auth } from '../firebase';
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 const LEGACY_KEY  = "bball_tracker_v2";
 const PLAYER_KEY  = "bball_active_player";
-const FIRESTORE_PATH = (uid) => `users/${uid}/data/db`;
 
 // Module-scoped uid — set once anonymous sign-in resolves
 let uid = null;
@@ -37,6 +36,40 @@ const getUid = () => {
 // Expose UID for components that need it (e.g. Settings device ID display)
 export const getCurrentUid = () => uid;
 
+// ── Org path routing (Phase 2 §2.4) ──────────────────────────────────────────
+//
+// Personal path (default):  users/{uid}/data/db
+// Org path (when user has an org role): orgs/{orgId}/data/db
+//
+// Cache the resolved path per uid to avoid repeated Firestore reads.
+// Call invalidatePathCache() after sign-in / sign-out so the next load
+// re-evaluates the role.
+//
+let _pathCache = {};
+
+export const invalidatePathCache = () => { _pathCache = {}; };
+
+const getActivePath = async (resolvedUid) => {
+  if (_pathCache[resolvedUid]) return _pathCache[resolvedUid];
+
+  try {
+    const rolesRef = collection(firestoreDb, `users/${resolvedUid}/roles`);
+    const rolesSnap = await getDocs(rolesRef);
+    if (!rolesSnap.empty) {
+      // User has at least one org role — route to the org's shared path.
+      // Uses the first role document (orgId is the document ID).
+      const orgId = rolesSnap.docs[0].id;
+      _pathCache[resolvedUid] = `orgs/${orgId}/data/db`;
+      return _pathCache[resolvedUid];
+    }
+  } catch {
+    // roles subcollection does not exist yet — fall through to personal path
+  }
+
+  _pathCache[resolvedUid] = `users/${resolvedUid}/data/db`;
+  return _pathCache[resolvedUid];
+};
+
 // ── Default shape ─────────────────────────────────────────────────────────────
 const defaultDb = () => ({
   games: [], tournaments: [], players: [],
@@ -46,8 +79,9 @@ const defaultDb = () => ({
 // ── loadDb ────────────────────────────────────────────────────────────────────
 export const loadDb = async () => {
   try {
-    const uid = await getUid();
-    const ref = doc(firestoreDb, FIRESTORE_PATH(uid));
+    const resolvedUid = await getUid();
+    const path = await getActivePath(resolvedUid);
+    const ref = doc(firestoreDb, path);
     const snap = await getDoc(ref);
 
     if (snap.exists()) {
@@ -84,8 +118,9 @@ export const persist = async (db) => {
   try { localStorage.setItem(LEGACY_KEY, JSON.stringify(db)); } catch { /* quota */ }
 
   try {
-    const uid = await getUid();
-    const ref = doc(firestoreDb, FIRESTORE_PATH(uid));
+    const resolvedUid = await getUid();
+    const path = await getActivePath(resolvedUid);
+    const ref = doc(firestoreDb, path);
     await setDoc(ref, db);
   } catch (err) {
     console.error("persist error:", err);
