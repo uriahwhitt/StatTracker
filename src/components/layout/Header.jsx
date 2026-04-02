@@ -1,5 +1,6 @@
 import { T } from "../../utils/constants";
 import { calcPoints } from "../../utils/stats";
+import { useAuthUser } from "../../utils/auth";
 
 const GearIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -9,6 +10,9 @@ const GearIcon = () => (
 );
 
 export default function Header({ db, activePlayerId, setActivePlayer, view, stats, setView }) {
+  const user = useAuthUser();
+  const isAuthenticated = user && !user.isAnonymous;
+
   return (
     <div style={{
       background: "linear-gradient(160deg, #0e0e1c 0%, #16082a 100%)",
@@ -46,7 +50,24 @@ export default function Header({ db, activePlayerId, setActivePlayer, view, stat
           }}
           aria-label="Settings"
         >
-          <GearIcon />
+          {/* Gear icon with optional profile photo avatar overlay */}
+          <div style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <GearIcon />
+            {isAuthenticated && user.photoURL && (
+              <img
+                src={user.photoURL}
+                alt=""
+                style={{
+                  position: "absolute",
+                  bottom: -4, right: -4,
+                  width: 13, height: 13,
+                  borderRadius: "50%",
+                  border: "1.5px solid #0a0a0f",
+                  objectFit: "cover",
+                }}
+              />
+            )}
+          </div>
         </button>
       </div>
     </div>

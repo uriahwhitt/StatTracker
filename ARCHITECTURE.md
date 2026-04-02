@@ -1,3 +1,6 @@
+> **SUPERSEDED — Do not use as primary reference.**
+> This document is preserved for historical context only. `MASTER_PLAN.md` is the single canonical reference for all architecture, data models, and feature specifications. Where this document and `MASTER_PLAN.md` conflict, `MASTER_PLAN.md` takes precedence.
+
 # StatTracker — Architecture & Design Document
 
 **Phase B/C Implementation Guide — March 2026**
@@ -23,7 +26,7 @@
 
 ## 1. Project Overview
 
-StatTracker is a mobile-first basketball stat tracking PWA built with React + Vite, deployed to `trackstat.netlify.app`. Designed for solo use by a single organization managing multiple teams, with a roadmap toward multi-org tournament platform support.
+StatTracker is a mobile-first basketball stat tracking PWA built with React + Vite, deployed to `trackstat.netlify.app`. Designed initially for solo use by a single organization, with Phase 2 expanding to multi-user, multi-role, and multi-org support.
 
 | | |
 |---|---|
@@ -33,6 +36,16 @@ StatTracker is a mobile-first basketball stat tracking PWA built with React + Vi
 | **Next phases** | Phase B — Manage tab CRUD / Phase C — Scorebook MVP |
 | **Primary user** | Solo developer / org admin tracking multiple teams |
 | **Future vision** | Tournament organizer platform with multi-org support |
+
+---
+
+> ⚠️ **Phase 2 Notice**
+> This document covers Phase 1 / Phase 1.5 architecture. Phase 2 extends and in some places supersedes it. Before implementing any auth, role, player profile, or sync logic, read `PHASE2_ARCHITECTURE.md` first. Where the two documents conflict, `PHASE2_ARCHITECTURE.md` is authoritative.
+>
+> Sections affected by Phase 2:
+> - §2 locked decisions (Clock row, Player scope row)
+> - §11.5 Role-Based Access Model (fully superseded)
+> - §9 Firebase Phase 1.5 (extended — Phase 2 adds new top-level collections alongside the existing path)
 
 ---
 
@@ -49,9 +62,9 @@ The following decisions are final and must not be revisited during Phase B/C imp
 | **Data hierarchy** | Organization → Team → Player (org-scoped). Jersey numbers live on team roster, overridable per game. |
 | **No miss buttons** | Made-only stat entry. Corrections via undo / event log delete. |
 | **Assist flow** | 2-second auto-dismiss after scoring event. |
-| **Clock** | Deferred for MVP. Quarter/half number only. |
+| **Clock** | Deferred for Phase 1 MVP. Implemented in Phase 2 as a configurable countdown clock. See PHASE2_ARCHITECTURE.md §7. |
 | **Autosave** | Continuous write to storage on every game state change (300ms debounce). |
-| **Player scope** | Players are org-scoped. A player belongs to exactly one organization. |
+| **Player scope** | Players are org-scoped within the local db schema. In Phase 2, players also exist as top-level Firestore entities independent of any org. See PHASE2_ARCHITECTURE.md §3. The local db shape is unchanged. |
 | **Tournament scope** | Tournaments are global (not org-owned). Any team from any org can be linked. |
 | **IDs** | All IDs are strings (UUID-style). Compatible with both localStorage keys and Firebase document IDs. No migration needed on Phase 1.5 upgrade. |
 
@@ -516,23 +529,13 @@ Work through these items sequentially. Complete and verify each before starting 
 - Future: game-by-game trend charts, tournament-only stat filters, comparison to team averages.
 - The `phase` and `bracketName` fields on individual games enable tournament-only stat isolation today.
 
-### 11.5 Role-Based Access Model (Phase 2)
+### 11.5 Role-Based Access Model — SUPERSEDED
 
-When Google OAuth is implemented, enforce the following role model
-via Firestore security rules and UI-level route guards:
+The role model defined here has been superseded by PHASE2_ARCHITECTURE.md §1. The authoritative role definitions, storage paths, and permission table are in that document.
 
-| Role        | Manage | Scorebook | History | Reports |
-|-------------|--------|-----------|---------|---------|
-| Org Admin   | full   | full      | full    | full    |
-| Coach       | none   | view only | full    | full    |
-| Parent      | none   | none      | own     | own     |
-| Score Table | none   | input     | none    | none    |
+The role values defined here (admin, coach, parent, scoretable) are replaced by: owner, headcoach, assistantcoach, parent, scorekeeper. Do not implement the old role values.
 
-Roles are stored per user per org in Firestore at:
-`users/{uid}/roles/{orgId} = { role: "admin" | "coach" | "parent" | "scoretable" }`
-
-Transfer codes go away entirely when OAuth is live —
-replaced by invitation flow in the Manage tab.
+The statement that "transfer codes go away entirely when OAuth is live" is also superseded. Transfer codes are permanent. See PHASE2_ARCHITECTURE.md §2.1.
 
 ---
 

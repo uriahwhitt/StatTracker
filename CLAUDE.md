@@ -18,9 +18,10 @@ If asked to deploy or merge to production, confirm with the user first.
 
 ## Before Writing Any Code
 
-1. Read `ARCHITECTURE.md` — it is the authoritative reference for all data models, nav structure, and component responsibilities.
-2. Read the file(s) you are about to change. Never modify code you haven't read.
-3. If a `prompt.md` exists in the project root, treat it as the current session's task list.
+1. Read `MASTER_PLAN.md` — it is the single authoritative reference for all data models, nav structure, component responsibilities, feature specs, and build sequencing. All other planning documents (`ARCHITECTURE.md`, `PHASE2_ARCHITECTURE.md`, `COMMUNICATION_PLAN.md`) are superseded by it.
+2. Read `IMPLEMENTATION_STATUS.md` — tracks current gate completion and known issues.
+3. Read the file(s) you are about to change. Never modify code you haven't read.
+4. If a `prompt.md` exists in the project root, treat it as the current session's task list.
 
 ---
 
@@ -38,10 +39,10 @@ If asked to deploy or merge to production, confirm with the user first.
 
 ## Data & Storage Rules
 
-- All app data lives in a single `db` object. Shape defined in `ARCHITECTURE.md §3`.
+- All app data lives in a single `db` object. Shape defined in `MASTER_PLAN.md §2`.
 - `loadDb()` and `persist(db)` are the only storage interface. Both are async (Firestore).
 - Storage backend: Firebase Firestore with offline persistence. Config via `.env` (never commit `.env`).
-- Firestore path: `users/{uid}/data/db` (anonymous auth, one document per device).
+- Firestore path (Phase 2): `users/{uid}/data/db` (personal, no org role) **or** `orgs/{orgId}/data/db` (org path when user has a role). Path is resolved automatically by `storage.js`. See `MASTER_PLAN.md §2.4`.
 - `.env` is gitignored. Use `.env.example` to document required variables.
 - The `db` object shape must always include: `games, tournaments, players, organizations, teams, scorebookGames, scheduledGames`.
 
@@ -129,6 +130,20 @@ Before declaring any task complete, run:
 npm run build
 ```
 The build must exit with code 0 (warnings about chunk size are acceptable — jspdf and firebase are large).
+
+---
+
+## Planning Documents
+
+| Document | Status | Purpose |
+|---|---|---|
+| `MASTER_PLAN.md` | ✅ **Canonical** | Single source of truth — architecture, data model, feature specs, build phases |
+| `IMPLEMENTATION_STATUS.md` | ✅ **Current** | Gate-by-gate completion status, known issues, uncommitted files |
+| `ARCHITECTURE.md` | ⚠️ Superseded | Phase 1/1.5 reference — preserved for history |
+| `PHASE2_ARCHITECTURE.md` | ⚠️ Superseded | Phase 2 auth/role delta — content merged into MASTER_PLAN.md |
+| `COMMUNICATION_PLAN.md` | ⚠️ Superseded | Communication feature pre-planning — content merged into MASTER_PLAN.md §3 |
+| `PLANNING_SUMMARY.md` | ⚠️ Superseded | March 23, 2026 session notes — content merged into MASTER_PLAN.md |
+| `STATTRACKER_PRD.md` | ⚠️ Superseded | Original PRD from March 16, 2026 — content merged into MASTER_PLAN.md |
 
 ---
 

@@ -1,7 +1,10 @@
+> **SUPERSEDED — Do not use as primary reference.**
+> This was the original PRD from March 16, 2026. Feature scope, architecture, and roadmap have all been superseded by `MASTER_PLAN.md`. The Scorebook Module requirements in §5 remain directionally useful but `MASTER_PLAN.md §3` is authoritative. The §8 Future Roadmap is replaced by `MASTER_PLAN.md §6`.
+
 # StatTracker Pro — Product Requirements Document
 **Version:** 1.1 — Refined after Q&A Session
 **Date:** March 16, 2026
-**Status:** Approved — Ready for Development (Phase A: File Restructure)  
+**Status:** Superseded by MASTER_PLAN.md  
 **Platform:** PWA (React) — Android/iOS/Desktop  
 **Backend:** Firebase (Auth + Firestore) — Phase 2  
 **Beta Tester:** Parent volunteer tracking 3 players simultaneously  
