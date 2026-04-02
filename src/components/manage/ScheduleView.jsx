@@ -48,6 +48,7 @@ export default function ScheduleView({ db, updateDb }) {
   const [editingGame, setEditingGame] = useState(null); // { game, source: "scheduled"|"scorebook" }
   const [gameModalTournId, setGameModalTournId] = useState(null);
   const [confirmDeleteTourn, setConfirmDeleteTourn] = useState(null);
+  const [confirmDeleteGame, setConfirmDeleteGame] = useState(null); // { id, source }
 
   const sectionLabel = (text) => (
     <div style={{ fontSize: 10, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8, marginTop: 20 }}>
@@ -74,6 +75,22 @@ export default function ScheduleView({ db, updateDb }) {
   };
 
   // ── Game CRUD ───────────────────────────────────────────────────────────────
+  const deleteGame = ({ id, source }) => {
+    if (source === "scorebook") {
+      const sbGame = db.scorebookGames.find(g => g.id === id);
+      let newDb = { ...db, scorebookGames: db.scorebookGames.filter(g => g.id !== id) };
+      if (sbGame?.scheduledGameId) {
+        newDb.scheduledGames = (db.scheduledGames || []).map(sg =>
+          sg.id === sbGame.scheduledGameId ? { ...sg, status: "scheduled" } : sg
+        );
+      }
+      updateDb(newDb);
+    } else {
+      updateDb({ ...db, scheduledGames: (db.scheduledGames || []).filter(g => g.id !== id) });
+    }
+    setConfirmDeleteGame(null);
+  };
+
   const saveGame = (data) => {
     if (data._source === "scorebook") {
       // Retroactive edit of a scorebook game
@@ -102,13 +119,18 @@ export default function ScheduleView({ db, updateDb }) {
   const scheduledGames = db.scheduledGames || [];
   const scorebookGames = db.scorebookGames || [];
 
+  // Scheduled games that have been loaded into the scorebook show up in both arrays.
+  // Suppress the scheduled entry once a scorebook game claims it via scheduledGameId.
+  const claimedScheduledIds = new Set(scorebookGames.map(g => g.scheduledGameId).filter(Boolean));
+  const unclaimedScheduled = scheduledGames.filter(g => !claimedScheduledIds.has(g.id));
+
   const gamesForTourn = (tournId) => [
-    ...scheduledGames.filter(g => g.tournamentId === tournId).map(g => ({ ...g, _source: "scheduled" })),
+    ...unclaimedScheduled.filter(g => g.tournamentId === tournId).map(g => ({ ...g, _source: "scheduled" })),
     ...scorebookGames.filter(g => g.tournamentId === tournId).map(g => ({ ...g, _source: "scorebook" })),
   ].sort((a, b) => (a.gameDate || "").localeCompare(b.gameDate || ""));
 
   const unlinked = [
-    ...scheduledGames.filter(g => !g.tournamentId).map(g => ({ ...g, _source: "scheduled" })),
+    ...unclaimedScheduled.filter(g => !g.tournamentId).map(g => ({ ...g, _source: "scheduled" })),
     ...scorebookGames.filter(g => !g.tournamentId).map(g => ({ ...g, _source: "scorebook" })),
   ].sort((a, b) => (b.gameDate || "").localeCompare(a.gameDate || ""));
 
@@ -116,20 +138,31 @@ export default function ScheduleView({ db, updateDb }) {
     const isFinal = game.status === "finalized" || game.status === "final";
     const isLive = game.status === "live";
     const dotColor = isFinal ? T.green : isLive ? T.orange : "#555";
+    const isConfirming = confirmDeleteGame?.id === game.id;
     return (
       <div style={{
         display: "flex", alignItems: "center", gap: 10, padding: "9px 0",
-        borderBottom: `1px solid ${T.border}`, cursor: "pointer",
-      }} onClick={onEdit}>
+        borderBottom: `1px solid ${T.border}`,
+      }}>
         <div style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, cursor: "pointer" }} onClick={onEdit}>
           <div style={{ fontSize: 13, color: "#ddd", fontWeight: 600 }}>vs {game.opponent || game.awayOpponent || "TBD"}</div>
           <div style={{ fontSize: 11, color: "#555" }}>{game.gameDate || game.date || "—"}</div>
         </div>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           {phaseBadge(game.phase, game.bracketName, game.round)}
+          {isConfirming ? (
+            <>
+              <button onClick={() => deleteGame(confirmDeleteGame)} style={smallBtn(T.red)}>Delete</button>
+              <button onClick={() => setConfirmDeleteGame(null)} style={smallBtn("#444")}>✕</button>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: 12, color: "#444", cursor: "pointer" }} onClick={onEdit}>›</span>
+              <button onClick={e => { e.stopPropagation(); setConfirmDeleteGame({ id: game.id, source: game._source }); }} style={smallBtn("rgba(239,68,68,0.25)")}>🗑</button>
+            </>
+          )}
         </div>
-        <span style={{ fontSize: 12, color: "#444" }}>›</span>
       </div>
     );
   };

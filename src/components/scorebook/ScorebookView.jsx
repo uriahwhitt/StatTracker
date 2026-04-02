@@ -10,6 +10,7 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
   const [mode, setMode] = useState("list"); // "list" | "setup" | "live"
   const [activeGameId, setActiveGameId] = useState(null);
   const [initialGame, setInitialGame] = useState(null); // pre-loaded from scheduled game
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   // Notify parent when live state changes
   useEffect(() => { onLiveChange?.(mode === "live"); }, [mode]);
@@ -45,6 +46,19 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
     setActiveGameId(null);
     setMode("list");
     setInitialGame(null);
+  };
+
+  const deleteGame = (gameId) => {
+    const game = db.scorebookGames.find(g => g.id === gameId);
+    let newDb = { ...db, scorebookGames: db.scorebookGames.filter(g => g.id !== gameId) };
+    // If linked to a scheduled game, reset it back to "scheduled"
+    if (game?.scheduledGameId) {
+      newDb.scheduledGames = (db.scheduledGames || []).map(sg =>
+        sg.id === game.scheduledGameId ? { ...sg, status: "scheduled" } : sg
+      );
+    }
+    updateDb(newDb);
+    setConfirmDeleteId(null);
   };
 
   // Live scorebook takes over the full screen
@@ -116,21 +130,32 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
           {liveGames.map(g => {
             const home = deriveTeamStats(g.events, g.format);
             const opp = deriveOpponentStats(g.events);
+            const isConfirming = confirmDeleteId === g.id;
             return (
-              <div key={g.id} onClick={() => resumeGame(g.id)} style={{
+              <div key={g.id} style={{
                 background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)",
-                borderRadius: 14, padding: "14px 16px", marginBottom: 10, cursor: "pointer",
+                borderRadius: 14, padding: "14px 16px", marginBottom: 10,
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
+                  <div onClick={() => resumeGame(g.id)} style={{ flex: 1, cursor: "pointer" }}>
                     <div style={{ fontWeight: 700, color: "#fff", fontSize: 15 }}>vs {g.opponent}</div>
                     <div style={{ fontSize: 12, color: "#444", marginTop: 2 }}>{fmtGameDate(g)}</div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22, fontWeight: 900, color: "#fff" }}>
-                      {home.score} <span style={{ color: "#555" }}>-</span> {opp.score}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div onClick={() => resumeGame(g.id)} style={{ textAlign: "right", cursor: "pointer" }}>
+                      <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22, fontWeight: 900, color: "#fff" }}>
+                        {home.score} <span style={{ color: "#555" }}>-</span> {opp.score}
+                      </div>
+                      <div style={{ fontSize: 11, color: T.green, fontWeight: 700 }}>TAP TO RESUME</div>
                     </div>
-                    <div style={{ fontSize: 11, color: T.green, fontWeight: 700 }}>TAP TO RESUME</div>
+                    {isConfirming ? (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button onClick={() => deleteGame(g.id)} style={deleteBtn(T.red)}>Delete</button>
+                        <button onClick={() => setConfirmDeleteId(null)} style={deleteBtn("#444")}>✕</button>
+                      </div>
+                    ) : (
+                      <button onClick={e => { e.stopPropagation(); setConfirmDeleteId(g.id); }} style={deleteBtn("rgba(239,68,68,0.2)")}>🗑</button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -145,21 +170,32 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
           {completedGames.map(g => {
             const home = deriveTeamStats(g.events, g.format);
             const opp = deriveOpponentStats(g.events);
+            const isConfirming = confirmDeleteId === g.id;
             return (
               <div key={g.id} style={{
                 background: T.card, border: `1px solid ${T.border}`,
                 borderRadius: 14, padding: "14px 16px", marginBottom: 10,
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, color: "#fff", fontSize: 15 }}>vs {g.opponent}</div>
                     <div style={{ fontSize: 12, color: "#444", marginTop: 2 }}>{fmtGameDate(g)}</div>
                     <div style={{ fontSize: 11, color: g.status === "finalized" ? T.blue : T.orange, marginTop: 2, fontWeight: 600 }}>
                       {g.status === "finalized" ? "Finalized" : "Completed"}
                     </div>
                   </div>
-                  <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22, fontWeight: 900, color: "#fff" }}>
-                    {home.score} <span style={{ color: "#555" }}>-</span> {opp.score}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22, fontWeight: 900, color: "#fff" }}>
+                      {home.score} <span style={{ color: "#555" }}>-</span> {opp.score}
+                    </div>
+                    {isConfirming ? (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button onClick={() => deleteGame(g.id)} style={deleteBtn(T.red)}>Delete</button>
+                        <button onClick={() => setConfirmDeleteId(null)} style={deleteBtn("#444")}>✕</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmDeleteId(g.id)} style={deleteBtn("rgba(239,68,68,0.2)")}>🗑</button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -176,3 +212,8 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
     </div>
   );
 }
+
+const deleteBtn = (bg) => ({
+  background: bg, border: "none", color: "#fff", borderRadius: 8,
+  padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0,
+});

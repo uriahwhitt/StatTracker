@@ -98,19 +98,18 @@ export default function GameHeader({
             const isFuture = p > period;
             return (
               <button key={p} onClick={() => {
-                if (isFuture) return;
                 onSetPeriod(p);
                 setPeriodSelectorOpen(false);
               }} style={{
                 padding: "8px 14px", borderRadius: 20, fontSize: 13, fontWeight: 800,
-                cursor: isFuture ? "default" : "pointer",
+                cursor: "pointer",
                 background: isCurrent
                   ? "rgba(249,115,22,0.25)"
-                  : isVisited ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.3)",
+                  : isVisited ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.02)",
                 border: `1px solid ${isCurrent
                   ? "rgba(249,115,22,0.6)"
-                  : isVisited ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)"}`,
-                color: isCurrent ? T.orange : isVisited ? "#555" : "#2a2a3a",
+                  : isVisited ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.08)"}`,
+                color: isCurrent ? T.orange : isVisited ? "#555" : "#444",
                 fontFamily: "'DM Mono',monospace",
               }}>{label}</button>
             );
