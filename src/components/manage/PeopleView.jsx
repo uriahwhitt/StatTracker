@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { T } from "../../utils/constants";
 import RosterModal from "./RosterModal";
+import MembersModal from "./MembersModal";
 
-export default function PeopleView({ db, updateDb }) {
+export default function PeopleView({ db, updateDb, user, userRole, isSuperadminUser }) {
   const [expandedOrgId, setExpandedOrgId] = useState(null);
   const [editingOrgId, setEditingOrgId] = useState(null);
   const [editingOrgName, setEditingOrgName] = useState("");
@@ -11,6 +12,7 @@ export default function PeopleView({ db, updateDb }) {
   const [editingTeamId, setEditingTeamId] = useState(null);
   const [editingTeamName, setEditingTeamName] = useState("");
   const [rosterModalTeamId, setRosterModalTeamId] = useState(null);
+  const [membersModalTeamId, setMembersModalTeamId] = useState(null);
   const [newOrgName, setNewOrgName] = useState("");
   const [addingOrg, setAddingOrg] = useState(false);
   const [playerFilter, setPlayerFilter] = useState("all");
@@ -197,6 +199,7 @@ export default function PeopleView({ db, updateDb }) {
                         <button onClick={() => { setEditingTeamId(team.id); setEditingTeamName(team.name); }} style={smallBtn("#555")}>Edit</button>
                       )}
                       <button onClick={() => setRosterModalTeamId(team.id)} style={smallBtn(T.blue)}>Roster ›</button>
+                      <button onClick={() => setMembersModalTeamId(team.id)} style={smallBtn(T.orange)}>Members ›</button>
                     </div>
                   </div>
                 ))}
@@ -386,6 +389,23 @@ export default function PeopleView({ db, updateDb }) {
           onClose={() => setRosterModalTeamId(null)}
         />
       )}
+
+      {/* Members modal */}
+      {membersModalTeamId && (() => {
+        const team = db.teams.find(t => t.id === membersModalTeamId);
+        const org = db.organizations.find(o => o.id === team?.orgId);
+        return (
+          <MembersModal
+            orgId={team?.orgId}
+            teamId={membersModalTeamId}
+            teamName={team?.name || ''}
+            orgName={org?.name || ''}
+            user={user}
+            userRole={userRole}
+            onClose={() => setMembersModalTeamId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

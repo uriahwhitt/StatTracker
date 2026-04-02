@@ -12,25 +12,46 @@ import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
 const LEGACY_KEY  = "bball_tracker_v2";
 const PLAYER_KEY  = "bball_active_player";
 
-// Module-scoped uid — set once anonymous sign-in resolves
+// Module-scoped uid — kept current by a persistent auth state listener
 let uid = null;
-let uidReady = null;
+let _uidWaiters = []; // resolve fns waiting for first uid
+
+// Org path set after invite acceptance — primed into cache on next auth resolve
+// so that loadDb() after a page reload routes to the org immediately.
+let _pendingOrgPath = localStorage.getItem('_pending_org_path') || null;
+
+export const setPendingOrgPath = (path) => {
+  _pendingOrgPath = path;
+  localStorage.setItem('_pending_org_path', path);
+};
+
+// Single persistent listener — stays active for the app lifetime.
+// Updates uid whenever auth state changes (sign-in, sign-out, token refresh).
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    uid = user.uid;
+    // If an invite acceptance set a pending org path, prime the cache now
+    if (_pendingOrgPath) {
+      setActivePath(uid, _pendingOrgPath);
+      _pendingOrgPath = null;
+      localStorage.removeItem('_pending_org_path');
+    }
+    // Unblock any callers waiting on getUid()
+    _uidWaiters.forEach(resolve => resolve(uid));
+    _uidWaiters = [];
+  } else {
+    // No user at all — create an anonymous session.
+    // Only reached when Firebase confirms nothing is persisted,
+    // so this never races against a restored Google session.
+    uid = null;
+    signInAnonymously(auth).catch(console.error);
+  }
+});
 
 const getUid = () => {
-  if (!uidReady) {
-    uidReady = new Promise((resolve) => {
-      const unsub = onAuthStateChanged(auth, (user) => {
-        if (user) {
-          uid = user.uid;
-          unsub();
-          resolve(uid);
-        }
-      });
-      // Trigger sign-in if not already signed in
-      signInAnonymously(auth).catch(console.error);
-    });
-  }
-  return uidReady;
+  if (uid) return Promise.resolve(uid);
+  // uid not yet known — queue until onAuthStateChanged fires
+  return new Promise((resolve) => _uidWaiters.push(resolve));
 };
 
 // Expose UID for components that need it (e.g. Settings device ID display)
@@ -48,6 +69,11 @@ export const getCurrentUid = () => uid;
 let _pathCache = {};
 
 export const invalidatePathCache = () => { _pathCache = {}; };
+
+// Explicitly prime the path cache for a uid — use after org creation so persist
+// doesn't have to re-query Firestore (which may not yet reflect the new role doc
+// in collection queries due to local cache indexing lag).
+export const setActivePath = (uid, path) => { _pathCache[uid] = path; };
 
 const getActivePath = async (resolvedUid) => {
   if (_pathCache[resolvedUid]) return _pathCache[resolvedUid];

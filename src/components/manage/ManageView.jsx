@@ -3,7 +3,7 @@ import { T } from "../../utils/constants";
 import PeopleView from "./PeopleView";
 import ScheduleView from "./ScheduleView";
 
-export default function ManageView({ db, updateDb }) {
+export default function ManageView({ db, updateDb, user, userRole, isSuperadminUser }) {
   const [segment, setSegment] = useState("people");
 
   const segBtn = (val, label) => (
@@ -25,7 +25,7 @@ export default function ManageView({ db, updateDb }) {
         {segBtn("schedule", "Schedule")}
       </div>
 
-      {segment === "people" && <PeopleView db={db} updateDb={updateDb} />}
+      {segment === "people" && <PeopleView db={db} updateDb={updateDb} user={user} userRole={userRole} isSuperadminUser={isSuperadminUser} />}
       {segment === "schedule" && <ScheduleView db={db} updateDb={updateDb} />}
     </div>
   );

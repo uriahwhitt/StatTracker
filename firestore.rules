@@ -1,0 +1,117 @@
+rules_version = '2.1';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isNonAnonymous() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function isSuperadmin() {
+      return request.auth.token.superadmin == true;
+    }
+
+    // True if the user has an active (not removed) role in the org
+    function hasOrgRole(uid, orgId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)) &&
+        get(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)).data.get('removedAt', null) == null;
+    }
+
+    // True if the user's active role in the org is owner or headcoach
+    function isHeadcoachOrAbove(uid, orgId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)) &&
+        get(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)).data.get('removedAt', null) == null &&
+        get(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)).data.role in ['owner', 'headcoach'];
+    }
+
+    // ── Invite documents ────────────────────────────────────────────────────
+
+    // /invites/{token}
+    // - Anyone (including anonymous) can read an invite to display the acceptance page
+    // - Headcoach+ can create invites
+    // - Any signed-in user can update (to mark usedAt) during acceptance
+    match /invites/{token} {
+      allow read: if true;
+      allow create: if isNonAnonymous() && (
+        isSuperadmin() ||
+        isHeadcoachOrAbove(request.auth.uid, request.resource.data.orgId)
+      );
+      allow update: if isNonAnonymous();
+    }
+
+    // ── Org collections ─────────────────────────────────────────────────────
+
+    // Org document (profile): any active member can read; headcoach+ can write.
+    // Also allows initial creation when the authenticated user claims ownership of a new org.
+    match /orgs/{orgId} {
+      allow read:  if isSignedIn() && (hasOrgRole(request.auth.uid, orgId) || isSuperadmin());
+      allow write: if isSignedIn() && (
+        isHeadcoachOrAbove(request.auth.uid, orgId) ||
+        isSuperadmin() ||
+        (
+          !exists(/databases/$(database)/documents/orgs/$(orgId)) &&
+          request.resource.data.ownerUid == request.auth.uid
+        )
+      );
+    }
+
+    // Org members sub-collection: active org members and non-anonymous signed-in users can read
+    // (non-anonymous allows an invite acceptor to check member list before their role doc is written);
+    // headcoach+ can write.
+    match /orgs/{orgId}/members/{uid} {
+      allow read:  if isSignedIn() && (hasOrgRole(request.auth.uid, orgId) || isNonAnonymous() || isSuperadmin());
+      allow write: if isSignedIn() && (
+        isHeadcoachOrAbove(request.auth.uid, orgId) ||
+        isSuperadmin() ||
+        // Allow a user to write their own member doc during invite acceptance
+        (isNonAnonymous() && request.auth.uid == uid)
+      );
+    }
+
+    // Org data/db: any active member can read; headcoach+ can write
+    match /orgs/{orgId}/data/db {
+      allow read:  if isSignedIn() && (hasOrgRole(request.auth.uid, orgId) || isSuperadmin());
+      allow write: if isSignedIn() && (isHeadcoachOrAbove(request.auth.uid, orgId) || isSuperadmin());
+    }
+
+    // Remaining org sub-documents: any active member can read; headcoach+ can write
+    match /orgs/{orgId}/{document=**} {
+      allow read:  if isSignedIn() && (hasOrgRole(request.auth.uid, orgId) || isSuperadmin());
+      allow write: if isSignedIn() && (isHeadcoachOrAbove(request.auth.uid, orgId) || isSuperadmin());
+    }
+
+    // ── User collections ────────────────────────────────────────────────────
+
+    // Notifications: owner of the uid path can read/write; headcoach+ can create notifications
+    // for other users (used when sending role-conflict notices to org owners)
+    match /users/{uid}/notifications/{notifId} {
+      allow read:  if isSignedIn() && (request.auth.uid == uid || isSuperadmin());
+      allow create: if isNonAnonymous();
+      allow update, delete: if isSignedIn() && (request.auth.uid == uid || isSuperadmin());
+    }
+
+    // User roles sub-collection: the user themselves can read/write their own roles;
+    // allow non-anonymous signed-in users to create (needed for invite acceptance
+    // where the acceptor writes their own role doc)
+    match /users/{uid}/roles/{orgId} {
+      allow read:  if isSignedIn() && (request.auth.uid == uid || isSuperadmin());
+      allow create: if isNonAnonymous() && (request.auth.uid == uid || isSuperadmin());
+      allow update: if isSignedIn() && (request.auth.uid == uid || isSuperadmin());
+    }
+
+    // All other user documents — private to the user or superadmin
+    match /users/{uid}/{document=**} {
+      allow read:  if isSignedIn() && (request.auth.uid == uid || isSuperadmin());
+      allow write: if isSignedIn() && (request.auth.uid == uid || isSuperadmin());
+    }
+
+  }
+}

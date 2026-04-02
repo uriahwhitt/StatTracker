@@ -1,3 +1,6 @@
+> **SUPERSEDED — Do not use as primary reference.**
+> This document is preserved for historical context only. `MASTER_PLAN.md` is the single canonical reference for all architecture, data models, and feature specifications. Where this document and `MASTER_PLAN.md` conflict, `MASTER_PLAN.md` takes precedence.
+
 # StatTracker — Architecture & Design Document
 
 **Phase B/C Implementation Guide — March 2026**

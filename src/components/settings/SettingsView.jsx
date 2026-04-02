@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { T } from "../../utils/constants";
-import { auth } from "../../firebase";
-import { getCurrentUid, invalidatePathCache } from "../../utils/storage";
+import { auth, db as firestoreDb } from "../../firebase";
+import { getCurrentUid, invalidatePathCache, setActivePath, loadDb } from "../../utils/storage";
 import {
   signInWithGoogle,
   signInWithExistingAccount,
   signOutUser,
+  isSuperadmin,
   useAuthUser,
 } from "../../utils/auth";
+import { getOrgForUser, removeRole } from "../../utils/roles";
 import {
   createTransferCode,
   deleteTransferCode,
@@ -16,6 +18,7 @@ import {
   formatCode,
 } from "../../utils/transferCode";
 import { version } from "../../../package.json";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 const EXPIRY_SECS = 10 * 60; // 10 minutes
 
@@ -292,8 +295,41 @@ const fmtSyncTime = (isoStr) => {
   return `${date} at ${time}`;
 };
 
+// ── Role badge label ──────────────────────────────────────────────────────────
+const ROLE_LABELS = {
+  owner: "Owner",
+  headcoach: "Head Coach",
+  assistantcoach: "Assistant Coach",
+  parent: "Parent",
+};
+
+// ── One-time data migration: personal path → org path ────────────────────────
+// currentDb: the in-memory db to migrate (avoids reading a potentially stale
+// Firestore snapshot when the caller has already built the correct state).
+async function migratePersonalDataToOrg(uid, orgId, currentDb) {
+  const personalRef = doc(firestoreDb, `users/${uid}/data/db`);
+  const snap = await getDoc(personalRef);
+
+  // Always write the current in-memory db to the org path — this is authoritative.
+  // currentDb is built by the caller immediately before this call and includes
+  // any in-flight edits (e.g. the newly created org in organizations[]).
+  const dataToMigrate = currentDb ?? (snap.exists() ? snap.data() : null);
+  if (dataToMigrate) {
+    await setDoc(doc(firestoreDb, `orgs/${orgId}/data/db`), dataToMigrate);
+  }
+
+  // Mark personal path as migrated only if not already done (one-time flag).
+  if (!snap.exists() || !snap.data().migratedToOrg) {
+    await setDoc(personalRef, {
+      ...(snap.exists() ? snap.data() : dataToMigrate ?? {}),
+      migratedToOrg: orgId,
+      migratedAt: new Date().toISOString(),
+    });
+  }
+}
+
 // ── Main SettingsView ─────────────────────────────────────────────────────────
-export default function SettingsView({ db }) {
+export default function SettingsView({ db, updateDb }) {
   const user = useAuthUser();
   const isAuthenticated = user && !user.isAnonymous;
 
@@ -314,8 +350,138 @@ export default function SettingsView({ db }) {
   const [syncError, setSyncError]           = useState(null);
   const [syncSuccess, setSyncSuccess]       = useState(false);
 
+  // Org state (authenticated users)
+  const [orgMembership, setOrgMembership]   = useState(null);  // { orgId, role, ... } or null
+  const [orgProfile, setOrgProfile]         = useState(null);  // { name, ownerUid, ... } or null
+  const [orgLoading, setOrgLoading]         = useState(false);
+  // Create org flow
+  const [showCreateOrg, setShowCreateOrg]   = useState(false);
+  const [newOrgName, setNewOrgName]         = useState("");
+  const [creatingOrg, setCreatingOrg]       = useState(false);
+  const [createOrgError, setCreateOrgError] = useState(null);
+
+  // Leave team flow
+  const [confirmLeave, setConfirmLeave]     = useState(false);
+  const [leaving, setLeaving]               = useState(false);
+  const [leaveError, setLeaveError]         = useState(null);
+
   const uid = getCurrentUid() || auth.currentUser?.uid || "";
   const shortUid = uid ? `${uid.slice(0, 8)}…` : "—";
+
+  // Superadmin status (async — reads Firebase Auth custom claims)
+  const [isSuperadminUser, setIsSuperadminUser] = useState(false);
+  useEffect(() => {
+    if (!user) { setIsSuperadminUser(false); return; }
+    isSuperadmin(user).then(setIsSuperadminUser).catch(() => setIsSuperadminUser(false));
+  }, [user]);
+
+  // Load org membership for authenticated users
+  useEffect(() => {
+    if (!isAuthenticated || !uid) return;
+    setOrgLoading(true);
+    getOrgForUser(uid)
+      .then(async (membership) => {
+        setOrgMembership(membership);
+        if (membership) {
+          const profileRef = doc(firestoreDb, `orgs/${membership.orgId}`);
+          const snap = await getDoc(profileRef);
+          if (snap.exists()) setOrgProfile(snap.data());
+        }
+      })
+      .catch(() => {})
+      .finally(() => setOrgLoading(false));
+  }, [isAuthenticated, uid]);
+
+  const handleCreateOrg = async () => {
+    const name = newOrgName.trim();
+    if (!name) return;
+    setCreatingOrg(true);
+    setCreateOrgError(null);
+    try {
+      const orgId = crypto.randomUUID();
+      const now = new Date().toISOString();
+
+      // Write owner role FIRST — rules for the org doc check this path.
+      // Include status + removedAt so the role doc matches the full Gate 3 schema.
+      const roleData = {
+        role: "owner",
+        teamId: null,
+        grantedByUid: uid,
+        grantedAt: now,
+        status: "active",
+        removedAt: null,
+        removedBy: null,
+      };
+      await setDoc(doc(firestoreDb, `users/${uid}/roles/${orgId}`), roleData);
+
+      // Denormalized member doc — enables the Members list UI to query orgs/{orgId}/members
+      const userObj = auth.currentUser;
+      await setDoc(doc(firestoreDb, `orgs/${orgId}/members/${uid}`), {
+        uid,
+        displayName: userObj?.displayName || "",
+        email: userObj?.email || "",
+        photoURL: userObj?.photoURL || null,
+        ...roleData,
+      });
+
+      // Write org profile (rule now passes because role doc exists)
+      await setDoc(doc(firestoreDb, `orgs/${orgId}`), {
+        name,
+        ownerUid: uid,
+        createdAt: now,
+      });
+
+      // Build updated db with this org in db.organizations so Manage tab sees it.
+      // Do this in memory before migration so the migrated snapshot includes it.
+      const updatedDb = db.organizations.some(o => o.id === orgId)
+        ? db
+        : { ...db, organizations: [...db.organizations, { id: orgId, name }] };
+
+      // Migrate personal data to org path using the updated in-memory db
+      await migratePersonalDataToOrg(uid, orgId, updatedDb);
+
+      // Invalidate path cache and immediately prime it with the org path.
+      // Do NOT rely on getActivePath re-querying Firestore: Firestore's
+      // persistentLocalCache may not yet surface the new role doc in a
+      // getDocs collection query, causing persist to silently write to the
+      // personal path instead of the org path.
+      invalidatePathCache();
+      setActivePath(uid, `orgs/${orgId}/data/db`);
+
+      // Persist updated db — now definitively routes to org path
+      updateDb(updatedDb);
+
+      // Update local state
+      const membership = { orgId, role: "owner", teamId: null, grantedByUid: uid, grantedAt: now };
+      setOrgMembership(membership);
+      setOrgProfile({ name, ownerUid: uid, createdAt: now });
+      setShowCreateOrg(false);
+      setNewOrgName("");
+    } catch (e) {
+      setCreateOrgError(e.message || "Failed to create organization. Please try again.");
+    } finally {
+      setCreatingOrg(false);
+    }
+  };
+
+  const handleLeaveTeam = async () => {
+    if (!orgMembership || !uid) return;
+    setLeaving(true);
+    setLeaveError(null);
+    try {
+      await removeRole(uid, orgMembership.orgId, uid);
+      setOrgMembership(null);
+      setOrgProfile(null);
+      setConfirmLeave(false);
+      // Reload so the app routes back to personal data
+      invalidatePathCache();
+      window.location.reload();
+    } catch (e) {
+      setLeaveError(e.message || "Failed to leave team.");
+    } finally {
+      setLeaving(false);
+    }
+  };
 
   const handleRefresh = async () => {
     setSyncing(true);
@@ -343,9 +509,14 @@ export default function SettingsView({ db }) {
       } else if (result.conflict) {
         // Google account belongs to a different Firebase UID
         setPendingCredential(result.credential);
+      } else if (result.user) {
+        // Sign-in succeeded — reload db from the correct path (personal or org).
+        // App.jsx only calls loadDb() once on mount, before auth resolves,
+        // so we must reload here to pick up the authenticated user's data.
+        invalidatePathCache();
+        const fresh = await loadDb();
+        updateDb(fresh);
       }
-      // On success (result.user), the auth state listener in useAuthUser
-      // will update automatically — no extra action needed
     } catch (err) {
       setSignInError(err.message || "Sign-in failed. Please try again.");
     } finally {
@@ -361,10 +532,12 @@ export default function SettingsView({ db }) {
       invalidatePathCache();
       await signInWithExistingAccount(pendingCredential);
       setPendingCredential(null);
-      // Reload so Firestore data from the existing account loads
-      window.location.reload();
+      // No reload needed — onAuthStateChanged updates useAuthUser reactively,
+      // which re-renders this component with the authenticated UI.
+      // storage.js uid is also updated via its persistent listener.
     } catch (err) {
       setSignInError(err.message || "Sign-in failed. Please try again.");
+    } finally {
       setSigningIn(false);
     }
   };
@@ -430,12 +603,122 @@ export default function SettingsView({ db }) {
             </div>
           </Card>
 
-          {/* My Teams (placeholder) */}
+          {/* My Teams */}
           <Card>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#ccc", marginBottom: 8 }}>My Teams</div>
-            <div style={{ fontSize: 12, color: "#444", lineHeight: 1.5 }}>
-              No team memberships yet. Ask your coach for a join code to get started.
-            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#ccc", marginBottom: 10 }}>My Teams</div>
+            {orgLoading ? (
+              <div style={{ fontSize: 12, color: "#444" }}>Loading…</div>
+            ) : orgMembership && orgProfile ? (
+              <div>
+                {/* Org row */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{orgProfile.name}</div>
+                  <div style={{
+                    fontSize: 10, fontWeight: 700, color: T.orange,
+                    background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.3)",
+                    borderRadius: 20, padding: "3px 10px", textTransform: "uppercase",
+                  }}>{ROLE_LABELS[orgMembership.role] || orgMembership.role}</div>
+                </div>
+                {orgMembership.role === "owner" && (
+                  <div style={{ fontSize: 12, color: "#555", marginTop: 8 }}>
+                    Manage Organization — coming soon
+                  </div>
+                )}
+                {orgMembership.role !== "owner" && !confirmLeave && (
+                  <button onClick={() => setConfirmLeave(true)} style={{
+                    marginTop: 12, width: "100%", padding: "9px", borderRadius: 9, fontSize: 12,
+                    fontWeight: 700, cursor: "pointer", background: "rgba(239,68,68,0.08)",
+                    border: "1px solid rgba(239,68,68,0.25)", color: T.red,
+                  }}>Leave Team</button>
+                )}
+                {orgMembership.role !== "owner" && confirmLeave && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 12, color: "#aaa", marginBottom: 8, lineHeight: 1.5 }}>
+                      Remove yourself from this team? This cannot be undone without a new invite.
+                    </div>
+                    {leaveError && <div style={{ fontSize: 12, color: T.red, marginBottom: 8 }}>{leaveError}</div>}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={handleLeaveTeam} disabled={leaving} style={{
+                        flex: 1, padding: "9px", borderRadius: 9, fontSize: 12, fontWeight: 700,
+                        cursor: leaving ? "default" : "pointer",
+                        background: leaving ? "rgba(255,255,255,0.04)" : "rgba(239,68,68,0.12)",
+                        border: `1px solid ${leaving ? T.border : T.red}`, color: leaving ? "#444" : T.red,
+                      }}>{leaving ? "Leaving…" : "Confirm Leave"}</button>
+                      <button onClick={() => { setConfirmLeave(false); setLeaveError(null); }} style={{
+                        flex: 1, padding: "9px", borderRadius: 9, fontSize: 12, fontWeight: 700,
+                        background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`, color: "#555", cursor: "pointer",
+                      }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : isSuperadminUser && showCreateOrg ? (
+              /* Superadmin only — org creation form */
+              <div>
+                <div style={{ fontSize: 12, color: "#888", marginBottom: 10, lineHeight: 1.5 }}>
+                  Enter a name for your organization (e.g. your school or club name).
+                </div>
+                <input
+                  type="text"
+                  value={newOrgName}
+                  onChange={e => { setCreateOrgError(null); setNewOrgName(e.target.value); }}
+                  placeholder="Organization name"
+                  maxLength={60}
+                  autoFocus
+                  style={{
+                    width: "100%", padding: "10px 12px", borderRadius: 8, fontSize: 14,
+                    background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`,
+                    color: "#fff", marginBottom: 10, boxSizing: "border-box",
+                  }}
+                />
+                {createOrgError && (
+                  <div style={{ fontSize: 12, color: T.red, marginBottom: 10, lineHeight: 1.4 }}>{createOrgError}</div>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={handleCreateOrg}
+                    disabled={creatingOrg || !newOrgName.trim()}
+                    style={{
+                      flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                      cursor: creatingOrg || !newOrgName.trim() ? "default" : "pointer",
+                      background: creatingOrg || !newOrgName.trim() ? "rgba(255,255,255,0.04)" : "rgba(249,115,22,0.15)",
+                      border: `1px solid ${creatingOrg || !newOrgName.trim() ? T.border : "rgba(249,115,22,0.4)"}`,
+                      color: creatingOrg || !newOrgName.trim() ? "#444" : T.orange,
+                    }}
+                  >{creatingOrg ? "Creating…" : "Create"}</button>
+                  <button
+                    onClick={() => { setShowCreateOrg(false); setNewOrgName(""); setCreateOrgError(null); }}
+                    style={{
+                      flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                      background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`,
+                      color: "#555", cursor: "pointer",
+                    }}
+                  >Cancel</button>
+                </div>
+              </div>
+            ) : (
+              /* No org yet — superadmin sees Create button, all others see Join only */
+              <div>
+                {isSuperadminUser && (
+                  <>
+                    <div style={{ fontSize: 12, color: "#444", lineHeight: 1.5, marginBottom: 10 }}>
+                      No organization yet. Create one to manage teams, rosters, and game data.
+                    </div>
+                    <button
+                      onClick={() => setShowCreateOrg(true)}
+                      style={{
+                        width: "100%", padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                        background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.35)",
+                        color: T.orange, cursor: "pointer", marginBottom: 10,
+                      }}
+                    >Create Organization</button>
+                  </>
+                )}
+                <div style={{ fontSize: 12, color: "#444", lineHeight: 1.5 }}>
+                  Have a join code? Team joining coming soon.
+                </div>
+              </div>
+            )}
           </Card>
 
           {/* Sign out */}

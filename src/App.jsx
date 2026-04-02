@@ -12,6 +12,9 @@ import ReportsView from "./components/reports/ReportsView";
 import ManageView from "./components/manage/ManageView";
 import ScorebookView from "./components/scorebook/ScorebookView";
 import SettingsView from "./components/settings/SettingsView";
+import InviteAcceptView from "./components/invite/InviteAcceptView";
+import { useAuthUser, isSuperadmin } from "./utils/auth";
+import { getOrgForUser } from "./utils/roles";
 
 // ── One-time data migration (v3) ──────────────────────────────────────────────
 const runMigrationV3 = () => {
@@ -73,10 +76,29 @@ const runMigrationV3 = () => {
 // Run migration before any state is initialized
 runMigrationV3();
 
+// ── Invite route detection ─────────────────────────────────────────────────────
+const inviteMatch = window.location.pathname.match(/^\/invite\/([A-Za-z0-9_-]+)$/);
+const INVITE_TOKEN = inviteMatch ? inviteMatch[1] : null;
+
+// ── App router ────────────────────────────────────────────────────────────────
+// Handles /invite/{token} vs the main app. Kept outside AppMain to avoid
+// calling hooks before this guard — React requires hooks to be called in
+// the same order every render.
 export default function App() {
+  if (INVITE_TOKEN) {
+    return <InviteAcceptView token={INVITE_TOKEN} />;
+  }
+  return <AppMain />;
+}
+
+// ── Main app ──────────────────────────────────────────────────────────────────
+function AppMain() {
+  const user = useAuthUser();
   const [view, setView] = useState("tracker");
   const [db, setDb] = useState(null);
   const [activePlayerId, setActivePlayerId] = useState("");
+  const [userRole, setUserRole] = useState(null);      // { orgId, role, teamId, ... }
+  const [isSuperadminUser, setIsSuperadminUser] = useState(false);
 
   // ── Async initial load from Firestore ────────────────────────────────────────
   useEffect(() => {
@@ -97,6 +119,17 @@ export default function App() {
       }
     });
   }, []);
+
+  // ── Resolve role + superadmin once auth is ready ──────────────────────────────
+  useEffect(() => {
+    if (!user || user.isAnonymous) {
+      setUserRole(null);
+      setIsSuperadminUser(false);
+      return;
+    }
+    getOrgForUser(user.uid).then(role => setUserRole(role || null));
+    isSuperadmin(user).then(setIsSuperadminUser);
+  }, [user]);
 
   const [stats, setStats] = useState(defaultStats());
   const [opponent, setOpponent] = useState("");
@@ -316,11 +349,11 @@ export default function App() {
         )}
 
         {view === "manage" && (
-          <ManageView db={db} updateDb={updateDb} />
+          <ManageView db={db} updateDb={updateDb} user={user} userRole={userRole} isSuperadminUser={isSuperadminUser} />
         )}
 
         {view === "settings" && (
-          <SettingsView db={db} />
+          <SettingsView db={db} updateDb={updateDb} />
         )}
       </div>
 
