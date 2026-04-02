@@ -541,21 +541,21 @@ export default function SettingsView({ db, updateDb }) {
     setSignInError(null);
     setPendingCredential(null);
     try {
+      sessionStorage.setItem('_auth_intent', JSON.stringify({ type: 'signin' }));
       const result = await signInWithGoogle();
+      if (result.redirecting) return; // browser navigates away — App.jsx handles on return
+      sessionStorage.removeItem('_auth_intent');
       if (result.cancelled) {
         // User closed popup — no action needed
       } else if (result.conflict) {
-        // Google account belongs to a different Firebase UID
         setPendingCredential(result.credential);
       } else if (result.user) {
-        // Sign-in succeeded — reload db from the correct path (personal or org).
-        // App.jsx only calls loadDb() once on mount, before auth resolves,
-        // so we must reload here to pick up the authenticated user's data.
         invalidatePathCache();
         const fresh = await loadDb();
         updateDb(fresh);
       }
     } catch (err) {
+      sessionStorage.removeItem('_auth_intent');
       setSignInError(err.message || "Sign-in failed. Please try again.");
     } finally {
       setSigningIn(false);

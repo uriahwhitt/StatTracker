@@ -35,14 +35,23 @@ export default function AuthGate() {
     setSigningIn(true);
     setError('');
     try {
+      // Store join intent so the redirect handler in App.jsx can complete it
+      sessionStorage.setItem('_auth_intent', JSON.stringify({
+        type: 'join',
+        code: codeInfo.code,
+        orgId: codeInfo.orgId,
+        teamId: codeInfo.teamId,
+      }));
       const result = await signInWithGoogle();
-      if (result.cancelled) { setSigningIn(false); return; }
+      if (result.redirecting) return; // browser navigates away
+      if (result.cancelled) { sessionStorage.removeItem('_auth_intent'); setSigningIn(false); return; }
       if (result.conflict) {
+        sessionStorage.removeItem('_auth_intent');
         setPendingCredential(result.credential);
         setSigningIn(false);
         return;
       }
-      // Signed in — redeem code
+      // Popup flow — redeem immediately
       const { user } = result;
       await redeemJoinCode(codeInfo.code, user.uid, {
         displayName: user.displayName,
@@ -52,6 +61,7 @@ export default function AuthGate() {
       setPendingOrgPath(`orgs/${codeInfo.orgId}/data/db`);
       window.location.reload();
     } catch (err) {
+      sessionStorage.removeItem('_auth_intent');
       setError(err.message || 'Sign-in failed. Please try again.');
       setSigningIn(false);
     }
@@ -81,7 +91,10 @@ export default function AuthGate() {
     setSigningIn(true);
     setError('');
     try {
+      sessionStorage.setItem('_auth_intent', JSON.stringify({ type: 'signin' }));
       const result = await signInWithGoogle();
+      if (result.redirecting) return; // browser navigates away
+      sessionStorage.removeItem('_auth_intent');
       if (result.cancelled) { setSigningIn(false); return; }
       if (result.conflict) {
         setPendingCredential(result.credential);
@@ -91,6 +104,7 @@ export default function AuthGate() {
       }
       window.location.reload();
     } catch (err) {
+      sessionStorage.removeItem('_auth_intent');
       setError(err.message || 'Sign-in failed.');
       setSigningIn(false);
     }

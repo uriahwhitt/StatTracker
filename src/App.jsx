@@ -17,9 +17,11 @@ import InviteAcceptView from "./components/invite/InviteAcceptView";
 import AuthGate from "./components/auth/AuthGate";
 import LiveGameBanner from "./components/live/LiveGameBanner";
 import LiveGameView from "./components/live/LiveGameView";
-import { useAuthUser, isSuperadmin } from "./utils/auth";
+import { useAuthUser, isSuperadmin, handleRedirectResult } from "./utils/auth";
 import { getAllUserRoles } from "./utils/roles";
 import { subscribeLiveGame } from "./utils/liveGame";
+import { redeemJoinCode } from "./utils/joinCode";
+import { setPendingOrgPath } from "./utils/storage";
 
 // ── One-time data migration (v3) ──────────────────────────────────────────────
 const runMigrationV3 = () => {
@@ -119,6 +121,30 @@ function AppMain() {
   const [scorebookLive, setScorebookLive] = useState(false);
 
   // ── ALL effect hooks (must run unconditionally, every render) ───────────────
+
+  // Handle Google OAuth redirect result (mobile/PWA flow).
+  // Runs once on mount — processes any pending redirect from linkWithRedirect.
+  useEffect(() => {
+    handleRedirectResult().then(result => {
+      if (!result?.linked) return;
+      const intentStr = sessionStorage.getItem('_auth_intent');
+      sessionStorage.removeItem('_auth_intent');
+      const intent = intentStr ? JSON.parse(intentStr) : {};
+      if (intent.type === 'join' && intent.code) {
+        redeemJoinCode(intent.code, result.user.uid, {
+          displayName: result.user.displayName,
+          email: result.user.email,
+          photoURL: result.user.photoURL,
+        }).then(() => {
+          setPendingOrgPath(`orgs/${intent.orgId}/data/db`);
+          window.location.reload();
+        }).catch(() => window.location.reload());
+      } else {
+        window.location.reload();
+      }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!user || user.isAnonymous) return;
     loadDb().then(loaded => {
