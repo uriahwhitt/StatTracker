@@ -8,6 +8,8 @@ import { signInWithGoogle, signInWithExistingAccount } from '../../utils/auth';
 import { lookupJoinCode, redeemJoinCode } from '../../utils/joinCode';
 import { setPendingOrgPath } from '../../utils/storage';
 
+const isSamsungBrowser = () => /SamsungBrowser/i.test(navigator.userAgent);
+
 export default function AuthGate() {
   const [mode, setMode] = useState('home'); // 'home' | 'join'
   const [code, setCode] = useState('');
@@ -150,6 +152,19 @@ export default function AuthGate() {
           <div style={{ fontSize: 28, fontWeight: 900, color: T.orange, lineHeight: 1.1 }}>Stat Tracker</div>
         </div>
 
+        {/* ── Samsung Internet warning ── */}
+        {isSamsungBrowser() && (
+          <div style={{
+            background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+            borderRadius: 12, padding: '14px 16px', marginBottom: 16,
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#F59E0B', marginBottom: 4 }}>Browser Not Supported</div>
+            <div style={{ fontSize: 12, color: '#888', lineHeight: 1.6 }}>
+              Samsung Internet is not compatible with Google sign-in. Please open this app in <strong style={{ color: '#fff' }}>Google Chrome</strong> to continue.
+            </div>
+          </div>
+        )}
+
         {/* ── Home ── */}
         {mode === 'home' && (
           <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '28px 24px' }}>
@@ -162,9 +177,9 @@ export default function AuthGate() {
 
             {mode === 'conflict' ? null : (
               <>
-                <GoogleBtn onClick={handleGoogleSignIn} loading={signingIn} label="Sign in with Google" />
+                <GoogleBtn onClick={handleGoogleSignIn} loading={signingIn} label="Sign in with Google" disabled={isSamsungBrowser()} />
                 <div style={{ textAlign: 'center', color: '#444', fontSize: 12, margin: '16px 0' }}>— or —</div>
-                <OutlineBtn onClick={() => { setMode('join'); setError(''); }}>
+                <OutlineBtn onClick={() => { setMode('join'); setError(''); }} disabled={isSamsungBrowser()}>
                   Join a Team with a Code
                 </OutlineBtn>
               </>
@@ -242,17 +257,18 @@ export default function AuthGate() {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
-function GoogleBtn({ onClick, loading, label }) {
+function GoogleBtn({ onClick, loading, label, disabled: forcedDisabled }) {
+  const isDisabled = loading || forcedDisabled;
   return (
-    <button onClick={onClick} disabled={loading} style={{
+    <button onClick={onClick} disabled={isDisabled} style={{
       width: '100%', padding: '13px 16px', borderRadius: 10, fontSize: 14, fontWeight: 700,
-      cursor: loading ? 'default' : 'pointer',
+      cursor: isDisabled ? 'default' : 'pointer',
       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-      background: loading ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.08)',
-      border: `1px solid ${loading ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.2)'}`,
-      color: loading ? '#444' : '#fff',
+      background: isDisabled ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.08)',
+      border: `1px solid ${isDisabled ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.2)'}`,
+      color: isDisabled ? '#444' : '#fff',
     }}>
-      {!loading && (
+      {!isDisabled && (
         <svg width="18" height="18" viewBox="0 0 24 24">
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -277,12 +293,12 @@ function OrangeBtn({ onClick, disabled, children }) {
   );
 }
 
-function OutlineBtn({ onClick, children, style }) {
+function OutlineBtn({ onClick, children, style, disabled }) {
   return (
-    <button onClick={onClick} style={{
+    <button onClick={onClick} disabled={disabled} style={{
       width: '100%', padding: '11px', borderRadius: 10, fontSize: 13, fontWeight: 600,
-      cursor: 'pointer', background: 'transparent',
-      border: '1px solid rgba(255,255,255,0.1)', color: '#555',
+      cursor: disabled ? 'default' : 'pointer', background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)', color: disabled ? '#333' : '#555',
       ...style,
     }}>{children}</button>
   );
