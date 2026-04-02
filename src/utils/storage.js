@@ -70,6 +70,23 @@ let _pathCache = {};
 
 export const invalidatePathCache = () => { _pathCache = {}; };
 
+// ── Active org selection (multi-team support) ─────────────────────────────────
+// Stored in localStorage per uid so it survives page reloads.
+// App calls setActiveOrgId when user switches teams via the team selector.
+
+export const setActiveOrgId = (uid, orgId) => {
+  if (orgId) {
+    localStorage.setItem(`_active_org_${uid}`, orgId);
+    _pathCache[uid] = `orgs/${orgId}/data/db`;
+  } else {
+    localStorage.removeItem(`_active_org_${uid}`);
+  }
+};
+
+export const getActiveOrgId = (uid) => {
+  return localStorage.getItem(`_active_org_${uid}`) || null;
+};
+
 // Explicitly prime the path cache for a uid — use after org creation so persist
 // doesn't have to re-query Firestore (which may not yet reflect the new role doc
 // in collection queries due to local cache indexing lag).
@@ -78,13 +95,19 @@ export const setActivePath = (uid, path) => { _pathCache[uid] = path; };
 const getActivePath = async (resolvedUid) => {
   if (_pathCache[resolvedUid]) return _pathCache[resolvedUid];
 
+  // If user has explicitly selected an org (multi-team), use that.
+  const savedOrg = getActiveOrgId(resolvedUid);
+  if (savedOrg) {
+    _pathCache[resolvedUid] = `orgs/${savedOrg}/data/db`;
+    return _pathCache[resolvedUid];
+  }
+
   try {
     const rolesRef = collection(firestoreDb, `users/${resolvedUid}/roles`);
     const rolesSnap = await getDocs(rolesRef);
-    if (!rolesSnap.empty) {
-      // User has at least one org role — route to the org's shared path.
-      // Uses the first role document (orgId is the document ID).
-      const orgId = rolesSnap.docs[0].id;
+    const activeDocs = rolesSnap.docs.filter(d => !d.data().removedAt);
+    if (activeDocs.length > 0) {
+      const orgId = activeDocs[0].id;
       _pathCache[resolvedUid] = `orgs/${orgId}/data/db`;
       return _pathCache[resolvedUid];
     }

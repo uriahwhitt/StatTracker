@@ -199,8 +199,8 @@ function ModalSheet({ onClose, title, children }) {
       <div style={{
         background: "#12121f", borderRadius: "16px 16px 0 0",
         width: "100%", maxWidth: 600,
-        maxHeight: "85vh", overflowY: "auto",
-        padding: "20px 16px env(safe-area-inset-bottom, 16px)",
+        maxHeight: "80vh", overflowY: "auto",
+        padding: "20px 16px 32px",
         border: `1px solid ${T.border}`, borderBottom: "none",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>

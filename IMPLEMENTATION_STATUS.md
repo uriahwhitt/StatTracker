@@ -5,8 +5,8 @@
 
 ## Current Position in Build Sequence
 
-**At:** Phase 2, Gate 4 — Parent Join Codes + Live Read (not yet started)
-**Last completed:** Gate 3 — Coach Invite Flow ✅ (tested and verified today)
+**At:** Phase 2, Gate 5 — Scorekeeper Assignment + Game Lock (not yet started)
+**Last completed:** Gate 4 — Parent Join Codes + Live Read ✅ (implemented April 2, 2026)
 
 ---
 
@@ -83,20 +83,41 @@ All Phase 1 / 1.5 items shipped. See `MASTER_PLAN.md §7 Gate 0`.
 
 ---
 
-### Gate 4 — Parent Join Codes + Live Read ⬜ NOT STARTED
+### Gate 4 — Parent Join Codes + Live Read ✅ COMPLETE
 
-- `/joinCodes/{code}` collection
-- Manage → Team → "Parent Join Code" (display, QR, regenerate)
-- Settings → "Join a Team" text entry
-- Google sign-in gate at join code entry for anonymous users
-- Parent role written on join
-- Firestore `onSnapshot` for live game score + box score
-- Read-only live game view for Parent/Coach during active locked game
+| Item | Status |
+|---|---|
+| `src/utils/joinCode.js` — `createJoinCode`, `getActiveJoinCode`, `lookupJoinCode`, `redeemJoinCode` | ✅ Done |
+| `src/utils/liveGame.js` — `publishLiveGame`, `clearLiveGame`, `subscribeLiveGame` | ✅ Done |
+| `src/utils/roles.js` — `getAllUserRoles` added | ✅ Done |
+| `src/utils/storage.js` — `setActiveOrgId`, `getActiveOrgId`, `getActivePath` multi-org routing | ✅ Done |
+| `src/components/auth/AuthGate.jsx` — anonymous gate; Google sign-in + join code flow | ✅ Done |
+| `src/components/manage/JoinCodePanel.jsx` — team join code sheet modal (display, copy, regenerate) | ✅ Done |
+| `src/components/manage/ParentManageView.jsx` — read-only teams + rosters for parent role | ✅ Done |
+| `src/components/live/LiveGameBanner.jsx` — pulsing banner shown when game is broadcasting | ✅ Done |
+| `src/components/live/LiveGameView.jsx` — full-screen live box score + event feed (read-only) | ✅ Done |
+| `src/components/layout/BottomNav.jsx` — `visibleTabs` prop for role-based nav | ✅ Done |
+| `src/components/scorebook/LiveScorebook.jsx` — "Go Live" bar, `publishLiveGame` on state change | ✅ Done |
+| `src/components/scorebook/ScorebookView.jsx` — passes `orgId` to LiveScorebook | ✅ Done |
+| `src/components/manage/PeopleView.jsx` — "Join Code" button per team | ✅ Done |
+| `src/components/settings/SettingsView.jsx` — join code entry + team preview + redeem flow | ✅ Done |
+| `src/App.jsx` — role-based tabs, multi-team selector, team context banner, live game integration, anonymous gate | ✅ Done |
+| `firestore.rules` — `/joinCodes/{code}` rules added | ✅ Done |
+
+**Architecture decisions locked:**
+- Anonymous users see only `AuthGate` (Google sign-in + join code entry)
+- Track tab hidden for all org-linked users
+- Parent visible tabs: `history`, `reports`, `manage` (read-only ParentManageView)
+- Coach/Owner visible tabs: `scorebook`, `history`, `reports`, `manage`
+- Multi-team users get a pill selector banner; switching re-scopes History + Reports
+- Go Live is explicit (coach-controlled) — prevents accidental broadcast during re-entry
+- liveGame path: `orgs/{orgId}/live/game` (4-segment Firestore doc path; covered by existing wildcard rule for org members)
 
 ---
 
-### Gate 5 — Scorekeeper Assignment + Game Lock ⬜ NOT STARTED
+### Gate 5 — Scorekeeper Role + Org Membership Management ⬜ NOT STARTED
 
+**5a — Scorekeeper Assignment + Game Lock**
 - `/scorekeeperAssignments/{gameId}` collection
 - Assign Scorekeeper flow in Manage → Schedule
 - "Start Keeping Score" button (assigned scorekeeper only)
@@ -105,6 +126,14 @@ All Phase 1 / 1.5 items shipped. See `MASTER_PLAN.md §7 Gate 0`.
 - 15-minute inactivity auto-release
 - "Break Lock" for Head Coach and above
 - Break lock notification to displaced scorekeeper
+
+**5b — Org Membership Management + New Roles**
+- `Org Staff` role (`role: 'orgstaff', teamId: null`) — org-level, no specific team
+- `staffRole` sub-field for future specialization (finance, admin, operations, etc.)
+- Org Members Panel in Manage → PeopleView: all org members grouped by team + org-level members
+- Transfer Ownership flow: promote member to co-owner → original owner steps down to Org Staff or leaves
+- Firestore rules: `orgstaff` handled by existing `hasOrgRole` helper (no changes needed)
+- Foundation for future financial features (player dues, payment tracking) and non-coaching admin roles
 
 ---
 
@@ -164,7 +193,7 @@ Prerequisites: Gates 3, 4, and 7 must be complete.
 | Firebase Storage rules helpers (`isOrgCoach`, etc.) not yet in `firestore.rules` | Future — Phase 3 |
 | `storage.js` multi-org routing: `rolesSnap.docs[0].id` is non-deterministic for multi-org users | ⚠️ Known — fix before any multi-org user exists |
 | No owner notification badge for `pending_conflict` roles — owner must manually check Members modal | ⚠️ Known — Gate 8 |
-| Coach data scope (History/Reports filtered to assigned teamId) not yet enforced in UI | ⚠️ Known — Gate 4 |
+| Coach data scope (History/Reports filtered to assigned teamId) not yet enforced in UI | ⚠️ Known — Gate 5+ |
 
 ---
 

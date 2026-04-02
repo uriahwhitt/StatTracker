@@ -13,8 +13,9 @@ import SubstitutionModal from "./SubstitutionModal";
 import GroupSubModal from "./GroupSubModal";
 import EventLogPanel from "./EventLogPanel";
 import EndGameFlow from "./EndGameFlow";
+import { publishLiveGame, clearLiveGame } from "../../utils/liveGame";
 
-export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
+export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
   const initial = db.scorebookGames.find(g => g.id === gameId);
   const [game, setGame] = useState(initial);
   const [showSubFor, setShowSubFor] = useState(null);
@@ -23,10 +24,34 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
   const [showEndGame, setShowEndGame] = useState(false);
   const [toast, setToast] = useState(null);
   const [assistMode, setAssistMode] = useState(null);
+  const [isLive, setIsLive] = useState(false);
   const assistTimerRef = useRef(null);
 
   // Autosave
   useAutosave(db, game);
+
+  // Publish live game state to Firestore whenever game changes while broadcasting
+  useEffect(() => {
+    if (!isLive || !orgId || !game) return;
+    const teamStats = deriveTeamStats(game.events || [], game.format);
+    const oppStats = deriveOpponentStats(game.events || []);
+    publishLiveGame(orgId, {
+      teamId: game.teamId,
+      teamName: db.teams?.find(t => t.id === game.teamId)?.name || '',
+      opponent: game.opponent || '',
+      homeScore: teamStats.score,
+      awayScore: oppStats.score,
+      period: getCurrentPeriod(game.events || []),
+      events: (game.events || []).filter(e => !e.deleted).slice(-50), // last 50 events
+      roster: game.roster || [],
+      format: game.format || {},
+    }).catch(() => {});
+  }, [game, isLive, orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const stopBroadcast = useCallback(() => {
+    setIsLive(false);
+    if (orgId) clearLiveGame(orgId).catch(() => {});
+  }, [orgId]);
 
   // Derived state
   const events = game?.events || [];
@@ -175,6 +200,7 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
       teams: updatedTeams,
       scheduledGames: updatedScheduled,
     });
+    if (isLive && orgId) clearLiveGame(orgId).catch(() => {});
     onExit();
   };
 
@@ -208,6 +234,35 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit }) {
         onTeamTechFoul={() => dispatch("team_tech_foul")}
         onHomeTimeout={() => dispatch("timeout_home")}
       />
+
+      {/* Go Live bar — only shown when orgId is available */}
+      {orgId && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "6px 12px",
+          background: isLive ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.02)",
+          borderBottom: `1px solid ${isLive ? "rgba(34,197,94,0.2)" : T.border}`,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: isLive ? T.green : "#333" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: isLive ? T.green : "#444", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              {isLive ? "Broadcasting Live" : "Not Broadcasting"}
+            </span>
+          </div>
+          <button
+            onClick={() => isLive ? stopBroadcast() : setIsLive(true)}
+            style={{
+              background: isLive ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.12)",
+              border: `1px solid ${isLive ? T.red : T.green}`,
+              color: isLive ? T.red : T.green,
+              borderRadius: 8, padding: "4px 12px", fontSize: 11, fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            {isLive ? "Stop" : "Go Live"}
+          </button>
+        </div>
+      )}
 
       {/* Active Player Rows */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px 8px", WebkitOverflowScrolling: "touch" }}>

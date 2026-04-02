@@ -78,7 +78,8 @@ The following decisions are final across all phases.
 
 ```
 Super Admin (platform operator — no org/team ownership)
-    └── Org Admin (paying customer, owns the org)
+    └── Org Owner / Admin (paying customer, owns the org)
+            ├── Org Staff (org-level, no specific team — admin, finance, future roles)
             └── Head Coach (manages one team, full scorebook access)
                     └── Assistant Coach (same team, no role management)
                             └── Scorekeeper (per-game temp assignment)
@@ -88,22 +89,25 @@ Super Admin (platform operator — no org/team ownership)
 
 **Key hierarchy rules:**
 - Users exist above the org level — a user can hold roles across multiple orgs simultaneously
-- Org Admin inherits all coach-level access on all teams in their org by default
-- Org Admin can simultaneously hold a Coach role (additive roles, not exclusive)
+- Org Owner inherits all coach-level access on all teams in their org by default
+- Org Owner can simultaneously hold a Coach role (additive roles, not exclusive)
+- Org Staff is an org-level role with `teamId: null` — not assigned to any specific team. Covers administrative, financial, and other non-coaching org functions. Access scope TBD per sub-role.
 - Scorekeeper is a per-game temporary assignment, not a standing role
 - Anonymous users cannot be assigned any role and remain invisible to the role system
 - A coach already active in one org can accept an invite from another org — roles are additive
+- **Ownership transfer:** During a transfer, two owners may temporarily coexist. The original owner retains full access until they explicitly step down (to Org Staff or leave). This is an in-app flow — no superadmin intervention required.
 
 ### 2.3 Role Definitions
 
 | Role | Scope | Manage | Scorebook | History | Reports | Notes |
 |---|---|---|---|---|---|---|
-| **Superadmin** | System-wide | Full | Full | Full | Full | Whitt's End account only. Custom claim. |
-| **Org Owner / Admin** | One org | Full | Full | Full | Full | Paying customer. All teams in org. |
-| **Head Coach** | One team | Team only | Full | Full | Full | Can assign roles, generate join codes, break game locks. |
+| **Superadmin** | System-wide | Full | Full | Full | Full | Platform operator only. Custom claim. |
+| **Org Owner / Admin** | One org | Full | Full | Full | Full | Paying customer. All teams in org. Creates teams. |
+| **Org Staff** | One org (no team) | TBD | None | Full | Full | Org-level, `teamId: null`. Finance, admin, and future sub-roles. Gate 5. |
+| **Head Coach** | One team | Team roster + members | Full | Full | Full | Can assign roles, generate join codes, break game locks. Cannot create teams. |
 | **Assistant Coach** | One team | None | Full | Full | Full | No role management. |
 | **Scorekeeper** | One game | None | Input only (locked game) | None | None | Temp per-game assignment. |
-| **Parent** | One team | None | Live read-only | Full | Full | Joins via reusable 6-character team join code. Google account required. |
+| **Parent** | One team | Read-only roster | Live read-only | Full | Full | Joins via reusable 6-character join code. Google account required. |
 
 ### 2.4 Role Storage
 
@@ -1479,8 +1483,9 @@ Transfer code to coach device. Coach validates History + Reports read-only.
 
 **Test condition:** Join own team with test parent account. During active locked game, parent sees live score updates within 2 seconds of stat entry.
 
-#### Gate 5 — Scorekeeper Assignment + Game Lock ⬜ NOT STARTED
+#### Gate 5 — Scorekeeper Role + Org Membership Management ⬜ NOT STARTED
 
+**5a — Scorekeeper Assignment + Game Lock**
 - `/scorekeeperAssignments/{gameId}` collection
 - Manage → Schedule → [Game] → "Assign Scorekeeper" flow
 - "Start Keeping Score" button for assigned scorekeeper
@@ -1491,7 +1496,37 @@ Transfer code to coach device. Coach validates History + Reports read-only.
 - "Break Lock" button for Head Coach and above + confirm dialog
 - In-app notification to displaced scorekeeper on break
 
-**Test condition:** Assign self as Scorekeeper on test game from second (non-superadmin) account. Claim lock, enter stats, confirm superadmin view shows live updates. Break lock from superadmin, confirm scorekeeper account receives notification and loses input access.
+**5b — Org Membership Management + New Roles**
+
+*Org Members Panel (new, org-level in Manage → PeopleView)*
+- Shows all members across all teams in the org, grouped by team
+- Shows org-level members separately (`teamId: null`) — Org Staff
+- Actions: Change Role, Assign to Team, Remove
+- Accessible to Org Owner and Superadmin
+
+*Org Staff role (`role: 'orgstaff', teamId: null`)*
+- Org-level standing role, not tied to any specific team
+- Future sub-role system: `staffRole` field (e.g. `'finance'`, `'admin'`, `'operations'`)
+- Planned for financial features (player dues, payment tracking) and non-coaching administrative tasks
+- Access scope: full History + Reports for all teams in org; no scorebook input; Manage is read-only org roster
+
+*Transfer Ownership flow (owner-only)*
+- Org Owner taps "Transfer Ownership" in the Org Members Panel
+- Picker shows all current org members
+- Selected member is immediately promoted to `role: 'owner', teamId: null`
+- Two owners coexist during the transition period
+- Original owner sees a persistent "Complete Transfer" banner
+- Original owner taps → chooses: **Become Org Staff** (retains org access, no team) or **Leave Org**
+- On step-down: original owner's role doc updated; transfer complete
+
+*Firestore rules additions*
+- `role === 'orgstaff'` handled in `hasOrgRole` (already works via `removedAt == null` check)
+- Owner transfer requires write to own role doc (self-demote) — already permitted
+
+**Test conditions:**
+- Assign Scorekeeper from second account, claim lock, break lock from HC account
+- Owner promotes HC to co-owner; two owners visible in panel; original owner steps down to Org Staff
+- Org Staff account sees full org history but cannot access scorebook or manage players
 
 #### Gate 6 — Scorebook Game Clock ⬜ NOT STARTED
 

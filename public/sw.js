@@ -1,7 +1,7 @@
 // StatTracker Service Worker
 // Cache-first strategy for app shell, network-first for everything else
 
-const CACHE_NAME = "stattracker-v27";
+const CACHE_NAME = "stattracker-v29";
 
 // App shell files to cache immediately on install
 const PRECACHE_URLS = [

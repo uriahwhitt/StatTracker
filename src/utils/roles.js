@@ -102,6 +102,18 @@ export const updateMemberRole = async (uid, orgId, newRole, updatedByUid) => {
   await updateDoc(doc(firestoreDb, `orgs/${orgId}/members/${uid}`), update).catch(() => {});
 };
 
+// Returns all active roles for a user across all orgs.
+export const getAllUserRoles = async (uid) => {
+  try {
+    const snap = await getDocs(collection(firestoreDb, `users/${uid}/roles`));
+    return snap.docs
+      .filter(d => !d.data().removedAt)
+      .map(d => ({ orgId: d.id, ...d.data() }));
+  } catch {
+    return [];
+  }
+};
+
 // List all members of an org from the denormalized orgs/{orgId}/members collection.
 // Includes removed members — filter by removedAt in the UI as needed.
 export const getOrgMembers = async (orgId) => {

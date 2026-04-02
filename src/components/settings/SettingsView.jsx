@@ -10,6 +10,7 @@ import {
   useAuthUser,
 } from "../../utils/auth";
 import { getOrgForUser, removeRole } from "../../utils/roles";
+import { lookupJoinCode, redeemJoinCode } from "../../utils/joinCode";
 import {
   createTransferCode,
   deleteTransferCode,
@@ -365,6 +366,13 @@ export default function SettingsView({ db, updateDb }) {
   const [leaving, setLeaving]               = useState(false);
   const [leaveError, setLeaveError]         = useState(null);
 
+  // Join a team via code
+  const [joinCode, setJoinCode]             = useState('');
+  const [joinCodeInfo, setJoinCodeInfo]     = useState(null); // looked-up code doc
+  const [joinLookingUp, setJoinLookingUp]   = useState(false);
+  const [joinRedeeming, setJoinRedeeming]   = useState(false);
+  const [joinError, setJoinError]           = useState('');
+
   const uid = getCurrentUid() || auth.currentUser?.uid || "";
   const shortUid = uid ? `${uid.slice(0, 8)}…` : "—";
 
@@ -480,6 +488,36 @@ export default function SettingsView({ db, updateDb }) {
       setLeaveError(e.message || "Failed to leave team.");
     } finally {
       setLeaving(false);
+    }
+  };
+
+  const handleJoinLookup = async () => {
+    const trimmed = joinCode.trim().toUpperCase();
+    if (trimmed.length !== 6) { setJoinError('Enter the 6-character code.'); return; }
+    setJoinLookingUp(true);
+    setJoinError('');
+    const result = await lookupJoinCode(trimmed);
+    setJoinLookingUp(false);
+    if (!result) { setJoinError('Code not found or no longer active.'); return; }
+    setJoinCodeInfo(result);
+  };
+
+  const handleJoinRedeem = async () => {
+    if (!joinCodeInfo || !isAuthenticated || !uid) return;
+    setJoinRedeeming(true);
+    setJoinError('');
+    try {
+      const userObj = auth.currentUser;
+      const codeData = await redeemJoinCode(joinCodeInfo.code, uid, {
+        displayName: userObj?.displayName || '',
+        email: userObj?.email || '',
+        photoURL: userObj?.photoURL || null,
+      });
+      setPendingOrgPath(`orgs/${codeData.orgId}/data/db`);
+      window.location.reload();
+    } catch (err) {
+      setJoinError(err.message || 'Failed to join team.');
+      setJoinRedeeming(false);
     }
   };
 
@@ -714,9 +752,54 @@ export default function SettingsView({ db, updateDb }) {
                     >Create Organization</button>
                   </>
                 )}
-                <div style={{ fontSize: 12, color: "#444", lineHeight: 1.5 }}>
-                  Have a join code? Team joining coming soon.
-                </div>
+                {/* Join a Team */}
+                {isAuthenticated && (
+                  <div style={{ marginTop: isSuperadminUser ? 12 : 0 }}>
+                    <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5, marginBottom: 10 }}>
+                      Have a join code? Enter it below to join a team.
+                    </div>
+                    {joinError && <div style={{ fontSize: 12, color: T.red, marginBottom: 8 }}>{joinError}</div>}
+                    {!joinCodeInfo ? (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input
+                          value={joinCode}
+                          onChange={e => { setJoinCode(e.target.value.toUpperCase().slice(0, 6)); setJoinError(''); }}
+                          onKeyDown={e => e.key === 'Enter' && handleJoinLookup()}
+                          placeholder="XXXXXX"
+                          maxLength={6}
+                          style={{ flex: 1, textAlign: "center", fontSize: 18, fontWeight: 700, letterSpacing: "0.15em", padding: "10px 12px" }}
+                        />
+                        <button onClick={handleJoinLookup} disabled={joinLookingUp || joinCode.length !== 6} style={{
+                          padding: "10px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                          cursor: joinLookingUp || joinCode.length !== 6 ? "default" : "pointer",
+                          background: joinLookingUp || joinCode.length !== 6 ? "rgba(255,255,255,0.04)" : "rgba(249,115,22,0.12)",
+                          border: `1px solid ${joinLookingUp || joinCode.length !== 6 ? T.border : T.orange}`,
+                          color: joinLookingUp || joinCode.length !== 6 ? "#444" : T.orange, flexShrink: 0,
+                        }}>{joinLookingUp ? "…" : "Find"}</button>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{ background: "rgba(249,115,22,0.08)", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                          <div style={{ fontWeight: 800, fontSize: 14, color: "#fff" }}>{joinCodeInfo.orgName}</div>
+                          <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{joinCodeInfo.teamName}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button onClick={handleJoinRedeem} disabled={joinRedeeming} style={{
+                            flex: 2, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                            cursor: joinRedeeming ? "default" : "pointer",
+                            background: joinRedeeming ? "rgba(255,255,255,0.04)" : "rgba(249,115,22,0.12)",
+                            border: `1px solid ${joinRedeeming ? T.border : T.orange}`,
+                            color: joinRedeeming ? "#444" : T.orange,
+                          }}>{joinRedeeming ? "Joining…" : "Join Team"}</button>
+                          <button onClick={() => { setJoinCodeInfo(null); setJoinCode(''); setJoinError(''); }} style={{
+                            flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+                            background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`, color: "#555", cursor: "pointer",
+                          }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </Card>

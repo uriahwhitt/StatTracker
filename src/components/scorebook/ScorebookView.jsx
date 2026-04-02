@@ -49,7 +49,9 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
 
   // Live scorebook takes over the full screen
   if (mode === "live" && activeGameId) {
-    return <LiveScorebook db={db} updateDb={updateDb} gameId={activeGameId} onExit={exitGame} />;
+    const activeGame = db.scorebookGames.find(g => g.id === activeGameId);
+    const orgId = db.teams?.find(t => t.id === activeGame?.teamId)?.orgId || null;
+    return <LiveScorebook db={db} updateDb={updateDb} gameId={activeGameId} onExit={exitGame} orgId={orgId} />;
   }
 
   // Setup wizard

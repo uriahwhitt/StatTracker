@@ -2,6 +2,7 @@ import { useState } from "react";
 import { T } from "../../utils/constants";
 import RosterModal from "./RosterModal";
 import MembersModal from "./MembersModal";
+import JoinCodePanel from "./JoinCodePanel";
 
 export default function PeopleView({ db, updateDb, user, userRole, isSuperadminUser }) {
   const [expandedOrgId, setExpandedOrgId] = useState(null);
@@ -21,6 +22,7 @@ export default function PeopleView({ db, updateDb, user, userRole, isSuperadminU
   const [newPlayerName, setNewPlayerName] = useState("");
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [confirmDeleteOrg, setConfirmDeleteOrg] = useState(null);
+  const [joinCodeTeamId, setJoinCodeTeamId] = useState(null);
 
   const sectionLabel = (text) => (
     <div style={{ fontSize: 10, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8, marginTop: 20 }}>
@@ -200,30 +202,33 @@ export default function PeopleView({ db, updateDb, user, userRole, isSuperadminU
                       )}
                       <button onClick={() => setRosterModalTeamId(team.id)} style={smallBtn(T.blue)}>Roster ›</button>
                       <button onClick={() => setMembersModalTeamId(team.id)} style={smallBtn(T.orange)}>Members ›</button>
+                      <button onClick={() => setJoinCodeTeamId(team.id)} style={smallBtn(T.green)}>Join Code</button>
                     </div>
                   </div>
                 ))}
 
                 {/* Add team row */}
-                {addingTeamToOrg === org.id ? (
-                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                    <input
-                      placeholder="Team name…"
-                      value={newTeamName}
-                      onChange={e => setNewTeamName(e.target.value)}
-                      onKeyDown={e => { if (e.key === "Enter") addTeam(org.id); if (e.key === "Escape") { setAddingTeamToOrg(null); setNewTeamName(""); } }}
-                      autoFocus
-                      style={{ flex: 1, fontSize: 13 }}
-                    />
-                    <button onClick={() => addTeam(org.id)} style={smallBtn(T.orange)}>Add</button>
-                    <button onClick={() => { setAddingTeamToOrg(null); setNewTeamName(""); }} style={smallBtn("#444")}>✕</button>
-                  </div>
-                ) : (
-                  <button onClick={() => setAddingTeamToOrg(org.id)} style={{
-                    marginTop: 10, width: "100%", background: "none",
-                    border: `1px dashed ${T.border}`, color: "#555", borderRadius: 8,
-                    padding: "8px", fontSize: 12, fontWeight: 600, cursor: "pointer",
-                  }}>+ Add team</button>
+                {(isSuperadminUser || userRole?.role === 'owner') && (
+                  addingTeamToOrg === org.id ? (
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      <input
+                        placeholder="Team name…"
+                        value={newTeamName}
+                        onChange={e => setNewTeamName(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") addTeam(org.id); if (e.key === "Escape") { setAddingTeamToOrg(null); setNewTeamName(""); } }}
+                        autoFocus
+                        style={{ flex: 1, fontSize: 13 }}
+                      />
+                      <button onClick={() => addTeam(org.id)} style={smallBtn(T.orange)}>Add</button>
+                      <button onClick={() => { setAddingTeamToOrg(null); setNewTeamName(""); }} style={smallBtn("#444")}>✕</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setAddingTeamToOrg(org.id)} style={{
+                      marginTop: 10, width: "100%", background: "none",
+                      border: `1px dashed ${T.border}`, color: "#555", borderRadius: 8,
+                      padding: "8px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    }}>+ Add team</button>
+                  )
                 )}
               </div>
             )}
@@ -231,8 +236,8 @@ export default function PeopleView({ db, updateDb, user, userRole, isSuperadminU
         );
       })}
 
-      {/* Add org */}
-      {addingOrg ? (
+      {/* Add org — superadmin only */}
+      {isSuperadminUser && (addingOrg ? (
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <input
             placeholder="Organization name…"
@@ -251,7 +256,7 @@ export default function PeopleView({ db, updateDb, user, userRole, isSuperadminU
           color: "#555", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 600, cursor: "pointer",
           marginBottom: 4,
         }}>+ Add Organization</button>
-      )}
+      ))}
 
       {/* ── All Players ── */}
       {sectionLabel("All Players")}
@@ -389,6 +394,22 @@ export default function PeopleView({ db, updateDb, user, userRole, isSuperadminU
           onClose={() => setRosterModalTeamId(null)}
         />
       )}
+
+      {/* Join Code modal */}
+      {joinCodeTeamId && (() => {
+        const team = db.teams.find(t => t.id === joinCodeTeamId);
+        const org = db.organizations.find(o => o.id === team?.orgId);
+        return (
+          <JoinCodePanel
+            orgId={team?.orgId}
+            teamId={joinCodeTeamId}
+            teamName={team?.name || ''}
+            orgName={org?.name || ''}
+            user={user}
+            onClose={() => setJoinCodeTeamId(null)}
+          />
+        );
+      })()}
 
       {/* Members modal */}
       {membersModalTeamId && (() => {

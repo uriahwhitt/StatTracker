@@ -1,4 +1,4 @@
-rules_version = '2.1';
+rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -30,6 +30,24 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)) &&
         get(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)).data.get('removedAt', null) == null &&
         get(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)).data.role in ['owner', 'headcoach'];
+    }
+
+    // ── Join codes ──────────────────────────────────────────────────────────
+
+    // /joinCodes/{code}
+    // - Anyone (including anonymous / unauthenticated) can read to look up a code
+    // - Headcoach+ can create new codes
+    // - Headcoach+ can update (deactivate old codes when regenerating)
+    match /joinCodes/{code} {
+      allow read: if true;
+      allow create: if isNonAnonymous() && (
+        isSuperadmin() ||
+        isHeadcoachOrAbove(request.auth.uid, request.resource.data.orgId)
+      );
+      allow update: if isNonAnonymous() && (
+        isSuperadmin() ||
+        isHeadcoachOrAbove(request.auth.uid, resource.data.orgId)
+      );
     }
 
     // ── Invite documents ────────────────────────────────────────────────────
