@@ -6,11 +6,18 @@ import { auth } from '../firebase';
 import {
   GoogleAuthProvider,
   linkWithPopup,
+  linkWithRedirect,
+  getRedirectResult,
   signInWithCredential,
   signOut,
   onAuthStateChanged,
 } from 'firebase/auth';
 import { useState, useEffect } from 'react';
+
+// True on mobile browsers and installed PWAs (where window.open is blocked)
+const isMobileOrPWA = () =>
+  /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+  window.matchMedia('(display-mode: standalone)').matches;
 
 const provider = new GoogleAuthProvider();
 
@@ -30,6 +37,14 @@ export const signInWithGoogle = async () => {
   const user = auth.currentUser;
   if (!user) throw new Error("No active session found. Please restart the app.");
 
+  // Mobile / PWA: popups are blocked — use redirect flow instead.
+  // Caller must store any intent (join code etc.) in sessionStorage before calling,
+  // then handleRedirectResult() picks it up after the app reloads.
+  if (isMobileOrPWA()) {
+    await linkWithRedirect(user, provider);
+    return { redirecting: true }; // browser navigates away; code below never runs
+  }
+
   try {
     const result = await linkWithPopup(user, provider);
     // Force token refresh so any custom claims are immediately available
@@ -37,8 +52,6 @@ export const signInWithGoogle = async () => {
     return { user: result.user, linked: true };
   } catch (err) {
     if (err.code === 'auth/credential-already-in-use') {
-      // Google account already linked to a different Firebase UID.
-      // Return the pending credential so the UI can offer a "Sign in instead" option.
       const credential = GoogleAuthProvider.credentialFromError(err);
       return { conflict: true, credential };
     }
@@ -49,6 +62,23 @@ export const signInWithGoogle = async () => {
       return { cancelled: true };
     }
     throw err;
+  }
+};
+
+// ── Redirect result handler — call once on app startup ────────────────────────
+// Returns { user, linked: true } | { conflict: true, credential } | null
+export const handleRedirectResult = async () => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (!result) return null;
+    await result.user.getIdToken(true);
+    return { user: result.user, linked: true };
+  } catch (err) {
+    if (err.code === 'auth/credential-already-in-use') {
+      const credential = GoogleAuthProvider.credentialFromError(err);
+      return { conflict: true, credential };
+    }
+    return null;
   }
 };
 
