@@ -20,6 +20,7 @@ import LiveGameView from "./components/live/LiveGameView";
 import { useAuthUser, isSuperadmin } from "./utils/auth";
 import { getAllUserRoles } from "./utils/roles";
 import { subscribeLiveGame } from "./utils/liveGame";
+import { initSyncStatus } from "./utils/syncStatus";
 
 // ── One-time data migration (v3) ──────────────────────────────────────────────
 const runMigrationV3 = () => {
@@ -119,6 +120,9 @@ function AppMain() {
   const [scorebookLive, setScorebookLive] = useState(false);
 
   // ── ALL effect hooks (must run unconditionally, every render) ───────────────
+
+  // Initialize network sync status monitor once on mount
+  useEffect(() => { initSyncStatus(); }, []);
 
   useEffect(() => {
     if (!user || user.isAnonymous) return;

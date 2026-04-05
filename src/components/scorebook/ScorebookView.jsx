@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { T, circBtn } from "../../utils/constants";
 import { fmtGameDate } from "../../utils/dates";
 import { deriveTeamStats, deriveOpponentStats } from "../../utils/scorebookEngine";
+import { clearLiveGame } from "../../utils/liveGame";
 import GameSetup from "./GameSetup";
 import LiveScorebook from "./LiveScorebook";
 import SectionLabel from "../common/SectionLabel";
@@ -180,8 +181,20 @@ export default function ScorebookView({ db, updateDb, onLiveChange }) {
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, color: "#fff", fontSize: 15 }}>vs {g.opponent}</div>
                     <div style={{ fontSize: 12, color: "#444", marginTop: 2 }}>{fmtGameDate(g)}</div>
-                    <div style={{ fontSize: 11, color: g.status === "finalized" ? T.blue : T.orange, marginTop: 2, fontWeight: 600 }}>
-                      {g.status === "finalized" ? "Finalized" : "Completed"}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 11, color: g.status === "finalized" ? T.blue : T.orange, fontWeight: 600 }}>
+                        {g.status === "finalized" ? "Finalized" : "Completed"}
+                      </span>
+                      {g.status === "finalized" && (() => {
+                        const orgId = db.teams?.find(t => t.id === g.teamId)?.orgId || null;
+                        return orgId ? (
+                          <button onClick={() => clearLiveGame(orgId).catch(() => {})} style={{
+                            fontSize: 10, color: T.red, background: "none", border: "none", cursor: "pointer", padding: 0,
+                          }}>
+                            End Broadcast
+                          </button>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

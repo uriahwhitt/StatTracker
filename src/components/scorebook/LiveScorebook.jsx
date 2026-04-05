@@ -6,6 +6,7 @@ import {
   formatEventDescription, convertToIndividualGame,
 } from "../../utils/scorebookEngine";
 import useAutosave from "../../hooks/useAutosave";
+import { getSyncStatus, onSyncStatusChange } from "../../utils/syncStatus";
 import GameHeader from "./GameHeader";
 import PlayerRow from "./PlayerRow";
 import OpponentStrip from "./OpponentStrip";
@@ -20,12 +21,17 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
   const [game, setGame] = useState(initial);
   const [showSubFor, setShowSubFor] = useState(null);
   const [showGroupSub, setShowGroupSub] = useState(false);
+  const [standbySubs, setStandbySubs] = useState([]);
   const [showEventLog, setShowEventLog] = useState(false);
   const [showEndGame, setShowEndGame] = useState(false);
   const [toast, setToast] = useState(null);
   const [assistMode, setAssistMode] = useState(null);
   const [isLive, setIsLive] = useState(false);
+  const [syncStatus, setSyncStatus] = useState(getSyncStatus());
   const assistTimerRef = useRef(null);
+
+  // Track network sync status
+  useEffect(() => onSyncStatusChange(setSyncStatus), []);
 
   // Autosave
   useAutosave(db, game);
@@ -33,18 +39,26 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
   // Publish live game state to Firestore whenever game changes while broadcasting
   useEffect(() => {
     if (!isLive || !orgId || !game) return;
-    const teamStats = deriveTeamStats(game.events || [], game.format);
-    const oppStats = deriveOpponentStats(game.events || []);
+    const allEvents = (game.events || []).filter(e => !e.deleted);
+    const teamStats = deriveTeamStats(allEvents, game.format);
+    const oppStats = deriveOpponentStats(allEvents);
+    const playerStatsList = (game.roster || []).map(r => ({
+      playerId: r.playerId,
+      ...derivePlayerStats(allEvents, r.playerId),
+    }));
     publishLiveGame(orgId, {
       teamId: game.teamId,
       teamName: db.teams?.find(t => t.id === game.teamId)?.name || '',
       opponent: game.opponent || '',
       homeScore: teamStats.score,
       awayScore: oppStats.score,
-      period: getCurrentPeriod(game.events || []),
-      events: (game.events || []).filter(e => !e.deleted).slice(-50), // last 50 events
+      period: getCurrentPeriod(allEvents),
+      playerStats: playerStatsList,   // pre-derived from full event log
+      events: allEvents.slice(-50),   // play-by-play feed only
       roster: game.roster || [],
       format: game.format || {},
+      updatedAt: new Date().toISOString(),
+      isLive: true,
     }).catch(() => {});
   }, [game, isLive, orgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -156,6 +170,7 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
       if (inP) newEvents.push(createEvent("substitution_in", period, inP, { timestamp: ts }));
     }
     setGame(g => ({ ...g, events: [...g.events, ...newEvents] }));
+    setStandbySubs([]);
     setShowGroupSub(false);
   };
 
@@ -206,6 +221,18 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
 
   const benchPlayers = roster.filter(r => !activePlayers.includes(r.playerId));
 
+  // Sort active players by jersey number for display — does not affect game logic
+  const sortedActivePlayers = [...activePlayers].sort((a, b) => {
+    const pA = roster.find(r => r.playerId === a);
+    const pB = roster.find(r => r.playerId === b);
+    const numA = parseInt(pA?.jerseyNumber, 10);
+    const numB = parseInt(pB?.jerseyNumber, 10);
+    if (isNaN(numA) && isNaN(numB)) return 0;
+    if (isNaN(numA)) return 1;
+    if (isNaN(numB)) return -1;
+    return numA - numB;
+  });
+
   const periodLabel = game.format.periodType === "quarter" ? `Q${period}` : `H${period}`;
   const maxPeriods = game.format.periods;
 
@@ -229,6 +256,7 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
         homeTimeouts={timeouts}
         onUndo={undoLast}
         onGroupSub={() => setShowGroupSub(true)}
+        standbyCount={standbySubs.length}
         onEventLog={() => setShowEventLog(true)}
         onEndGame={endGame}
         onTeamTechFoul={() => dispatch("team_tech_foul")}
@@ -237,36 +265,53 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
 
       {/* Go Live bar — only shown when orgId is available */}
       {orgId && (
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "6px 12px",
-          background: isLive ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.02)",
-          borderBottom: `1px solid ${isLive ? "rgba(34,197,94,0.2)" : T.border}`,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: isLive ? T.green : "#333" }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: isLive ? T.green : "#444", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              {isLive ? "Broadcasting Live" : "Not Broadcasting"}
-            </span>
+        <div>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "6px 12px",
+            background: isLive ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.02)",
+            borderBottom: syncStatus === "disconnected" ? "none" : `1px solid ${isLive ? "rgba(34,197,94,0.2)" : T.border}`,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 7, height: 7, borderRadius: "50%", background: isLive ? T.green : "#333" }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: isLive ? T.green : "#444", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                {isLive ? "Broadcasting Live" : "Not Broadcasting"}
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {/* Sync status dot */}
+              <div style={{
+                width: 6, height: 6, borderRadius: "50%",
+                background: syncStatus === "connected" ? T.green : syncStatus === "disconnected" ? T.red : "#555",
+              }} />
+              <button
+                onClick={() => isLive ? stopBroadcast() : setIsLive(true)}
+                style={{
+                  background: isLive ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.12)",
+                  border: `1px solid ${isLive ? T.red : T.green}`,
+                  color: isLive ? T.red : T.green,
+                  borderRadius: 8, padding: "4px 12px", fontSize: 11, fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                {isLive ? "Stop" : "Go Live"}
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => isLive ? stopBroadcast() : setIsLive(true)}
-            style={{
-              background: isLive ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.12)",
-              border: `1px solid ${isLive ? T.red : T.green}`,
-              color: isLive ? T.red : T.green,
-              borderRadius: 8, padding: "4px 12px", fontSize: 11, fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
-            {isLive ? "Stop" : "Go Live"}
-          </button>
+          {syncStatus === "disconnected" && (
+            <div style={{
+              fontSize: 11, color: "#888", textAlign: "center", padding: "4px 12px",
+              borderBottom: `1px solid ${T.border}`,
+            }}>
+              ⚠ No connection — stats saved locally, will sync when reconnected
+            </div>
+          )}
         </div>
       )}
 
       {/* Active Player Rows */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px 8px", WebkitOverflowScrolling: "touch" }}>
-        {activePlayers.map(pid => {
+        {sortedActivePlayers.map(pid => {
           const player = getPlayer(pid);
           const stats = playerStats[pid] || {};
           return (
@@ -318,6 +363,8 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
         <GroupSubModal
           roster={roster}
           activePlayers={activePlayers}
+          standbySubs={standbySubs}
+          onSaveStandby={(ids) => { setStandbySubs(ids); setShowGroupSub(false); }}
           onConfirm={handleGroupSub}
           onClose={() => setShowGroupSub(false)}
         />
