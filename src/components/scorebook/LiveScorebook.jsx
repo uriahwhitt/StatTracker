@@ -33,6 +33,8 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId, use
   const [lockBrokenBy, setLockBrokenBy] = useState("");
   const myLockRef = useRef(false);       // true if this user currently holds the lock
   const heartbeatTimerRef = useRef(null);
+  const lastHeartbeatRef = useRef(0);    // timestamp of last successful heartbeat write
+  const HEARTBEAT_THROTTLE_MS = 30_000; // max 1 Firestore write per 30s (15-min inactivity threshold)
   const assistTimerRef = useRef(null);
 
   // Track network sync status
@@ -112,10 +114,17 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId, use
     const evt = createEvent(type, period, playerId, extras);
     setGame(g => ({ ...g, events: [...g.events, evt] }));
 
-    // Debounced heartbeat — keeps the lock alive and signals active scoring
+    // Throttled heartbeat — triggered by activity but capped at 1 write per 30s.
+    // Proves the scorekeeper is still active without flooding the Firestore write queue.
     if (orgId && gameId && myLockRef.current) {
       if (heartbeatTimerRef.current) clearTimeout(heartbeatTimerRef.current);
-      heartbeatTimerRef.current = setTimeout(() => updateHeartbeat(orgId, gameId), 300);
+      heartbeatTimerRef.current = setTimeout(() => {
+        const now = Date.now();
+        if (now - lastHeartbeatRef.current >= HEARTBEAT_THROTTLE_MS) {
+          updateHeartbeat(orgId, gameId);
+          lastHeartbeatRef.current = now;
+        }
+      }, 300);
     }
 
     if (["2pt_made", "3pt_made"].includes(type) && playerId) {
