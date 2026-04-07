@@ -1,12 +1,12 @@
 # WE TRACK — Implementation Status
-**Date:** April 6, 2026 | **Branch:** `dev`
+**Date:** April 7, 2026 | **Branch:** `feat/gate-5a`
 
 ---
 
 ## Current Position in Build Sequence
 
-**At:** Phase 2, Gate 5 — Scorekeeper Assignment + Game Lock (not yet started)
-**Last completed:** Post-tournament stability fixes ✅ (April 6, 2026)
+**At:** Phase 2, Gate 5b — Org Membership Panel + New Roles (not yet started)
+**Last completed:** Gate 5a — Scorekeeper Assignment + Game Lock ✅ (April 7, 2026)
 **Gate 4 completed:** Parent Join Codes + Live Read ✅ (April 2, 2026)
 
 ---
@@ -135,17 +135,34 @@ Implemented on branch `fix/tournament-issues`. Root causes and UX issues surface
 
 ---
 
-### Gate 5 — Scorekeeper Role + Org Membership Management ⬜ NOT STARTED
+### Gate 5a — Scorekeeper Assignment + Game Lock ✅ COMPLETE (April 7, 2026)
 
-**5a — Scorekeeper Assignment + Game Lock**
-- `/scorekeeperAssignments/{gameId}` collection
-- Assign Scorekeeper flow in Manage → Schedule
-- "Start Keeping Score" button (assigned scorekeeper only)
-- Lock banner for all other users
-- `lastActivity` heartbeat (300ms debounce)
-- 15-minute inactivity auto-release
-- "Break Lock" for Head Coach and above
-- Break lock notification to displaced scorekeeper
+| Item | Status |
+|---|---|
+| `src/utils/scorekeeperLock.js` — `claimLock`, `releaseLock`, `breakLock`, `subscribeLock`, `subscribeAllLocks`, `updateHeartbeat` | ✅ Done |
+| `firestore.rules` — explicit `/orgs/{orgId}/scorekeeperAssignments/{gameId}` block | ✅ Done |
+| `ScheduleView.jsx` — "Assign" chip per scheduled game (HC+); member picker sheet via `getOrgMembers` | ✅ Done |
+| `GameModal.jsx` — preserves `scorekeeperId`/`scorekeeperName` through edits | ✅ Done |
+| `App.jsx` + `ManageView.jsx` — thread `user`/`userRole` to `ScorebookView`/`ScheduleView` | ✅ Done |
+| `ScorebookView.jsx` — three-state "Load from Schedule" (unassigned/mine/other); confirm dialog + lock claim; live card lock display; Break Lock for HC+; 15-min stale detection | ✅ Done |
+| `LiveScorebook.jsx` — 300ms debounced heartbeat on stat dispatch; lock subscription; "lock broken" overlay; `releaseLock` on finalize/exit | ✅ Done |
+
+**Architecture decisions locked:**
+- Lock doc path: `orgs/{orgId}/scorekeeperAssignments/{gameId}` (scorebook game ID, not scheduled)
+- Doc presence = locked; doc absence = unlocked (no status field needed)
+- Scorekeeper is any existing org member (no dedicated role); assignment is game-scoped
+- 15-min stale detection is client-side only — no Cloud Functions
+- `breakLock` writes to `users/{uid}/notifications/` for Gate 8 to surface
+
+**Test conditions:**
+- Assign scorekeeper from HC account → chip appears on game row in Schedule
+- Assigned user sees "START KEEPING SCORE"; unassigned coach sees "🔒 [name]"
+- HC sees "Take Over" on locked scheduled games
+- Lock heartbeat updates `lastActivity` in Firestore console during scoring
+- HC breaks lock → displaced scorekeeper sees full-screen overlay immediately
+- Finalize game → lock doc deleted from Firestore
+
+### Gate 5b — Org Membership Panel + New Roles ⬜ NOT STARTED
 
 **5b — Org Membership Management + New Roles**
 - `Org Staff` role (`role: 'orgstaff', teamId: null`) — org-level, no specific team
