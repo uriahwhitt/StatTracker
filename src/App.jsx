@@ -417,7 +417,7 @@ function AppMain() {
         )}
 
         {view === "scorebook" && visibleTabs.includes("scorebook") && (
-          <ScorebookView db={db} updateDb={updateDb} onLiveChange={handleScorebookLiveChange} />
+          <ScorebookView db={db} updateDb={updateDb} onLiveChange={handleScorebookLiveChange} user={user} userRole={userRole} />
         )}
 
         {view === "history" && (

@@ -33,6 +33,8 @@ export default function GameModal({ db, game, defaultTournamentId, onSave, onClo
         teamId,
         opponent: opponent.trim() || "TBD",
         gameDate,
+        scorekeeperId:   game?.scorekeeperId   ?? null,
+        scorekeeperName: game?.scorekeeperName ?? null,
         _source: game?._source || "scheduled",
       });
     }

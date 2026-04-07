@@ -100,6 +100,27 @@ service cloud.firestore {
       allow write: if isSignedIn() && (isHeadcoachOrAbove(request.auth.uid, orgId) || isSuperadmin());
     }
 
+    // Scorekeeper lock docs — explicit rules so non-HC scorekeepers can manage their own lock
+    match /orgs/{orgId}/scorekeeperAssignments/{gameId} {
+      // Any org member can read (to see who has the lock)
+      allow read: if isSignedIn() && (hasOrgRole(request.auth.uid, orgId) || isSuperadmin());
+      // Any org member can claim their own lock (scorekeeperId must match caller)
+      allow create: if isSignedIn() && hasOrgRole(request.auth.uid, orgId)
+                    && request.resource.data.scorekeeperUid == request.auth.uid;
+      // Lock holder can update (heartbeat); HC+ can update (break lock)
+      allow update: if isSignedIn() && (
+                      (hasOrgRole(request.auth.uid, orgId) && resource.data.scorekeeperUid == request.auth.uid)
+                      || isHeadcoachOrAbove(request.auth.uid, orgId)
+                      || isSuperadmin()
+                    );
+      // Lock holder can release; HC+ can break
+      allow delete: if isSignedIn() && (
+                      (hasOrgRole(request.auth.uid, orgId) && resource.data.scorekeeperUid == request.auth.uid)
+                      || isHeadcoachOrAbove(request.auth.uid, orgId)
+                      || isSuperadmin()
+                    );
+    }
+
     // Remaining org sub-documents: any active member can read; headcoach+ can write
     match /orgs/{orgId}/{document=**} {
       allow read:  if isSignedIn() && (hasOrgRole(request.auth.uid, orgId) || isSuperadmin());
