@@ -32,6 +32,30 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)).data.role in ['owner', 'headcoach'];
     }
 
+    // True if the user's active role is any coaching role (owner, headcoach, or
+    // assistantcoach). Used for org data writes — assistants need to save
+    // scorebook games and other game-day data.
+    function isCoachOrAbove(uid, orgId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)) &&
+        get(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)).data.get('removedAt', null) == null &&
+        get(/databases/$(database)/documents/users/$(uid)/roles/$(orgId)).data.role in ['owner', 'headcoach', 'assistantcoach'];
+    }
+
+    // Gate 5b — True if the user has the scorebook permission flag on their
+    // member doc. Falls back to a role check for legacy member docs that predate
+    // Gate 5b and therefore have no permissions object.
+    function hasScorebookPerm(uid, orgId) {
+      let memberRef = /databases/$(database)/documents/orgs/$(orgId)/members/$(uid);
+      return isSignedIn()
+        && exists(memberRef)
+        && get(memberRef).data.get('removedAt', null) == null
+        && (
+          get(memberRef).data.get('permissions', {}).get('scorebook', false) == true
+          || get(memberRef).data.get('role', '') in ['owner', 'headcoach', 'assistantcoach']
+        );
+    }
+
     // ── Join codes ──────────────────────────────────────────────────────────
 
     // /joinCodes/{code}
@@ -94,10 +118,14 @@ service cloud.firestore {
       );
     }
 
-    // Org data/db: any active member can read; headcoach+ can write
+    // Org data/db: any active member can read; only members with the scorebook
+    // permission flag can write. The flag is auto-granted to owner, headcoach,
+    // and assistantcoach, and is manually grantable to staff, manager, and
+    // parent. The scorekeeperAssignments system enforces who is actively
+    // scoring at runtime (game-level lock).
     match /orgs/{orgId}/data/db {
       allow read:  if isSignedIn() && (hasOrgRole(request.auth.uid, orgId) || isSuperadmin());
-      allow write: if isSignedIn() && (isHeadcoachOrAbove(request.auth.uid, orgId) || isSuperadmin());
+      allow write: if hasScorebookPerm(request.auth.uid, orgId) || isSuperadmin();
     }
 
     // Scorekeeper lock docs — explicit rules so non-HC scorekeepers can manage their own lock

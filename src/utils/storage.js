@@ -162,6 +162,19 @@ export const loadDb = async () => {
   }
 };
 
+// ── Firestore sanitizer ───────────────────────────────────────────────────────
+// Firestore rejects documents containing `undefined` values — the SDK throws
+// synchronously before the write even leaves the client. Recursively replace
+// every `undefined` with `null` so setDoc never throws on bad data.
+const sanitizeForFirestore = (value) => {
+  if (value === undefined) return null;
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(sanitizeForFirestore);
+  return Object.fromEntries(
+    Object.entries(value).map(([k, v]) => [k, sanitizeForFirestore(v)])
+  );
+};
+
 // ── persist ───────────────────────────────────────────────────────────────────
 export const persist = async (db) => {
   try { localStorage.setItem(LEGACY_KEY, JSON.stringify(db)); } catch { /* quota */ }
@@ -169,10 +182,12 @@ export const persist = async (db) => {
   try {
     const resolvedUid = await getUid();
     const path = await getActivePath(resolvedUid);
+    console.log('[persist] writing to:', path,
+      '| scorebookGames:', db.scorebookGames?.length ?? 0);
     const ref = doc(firestoreDb, path);
-    await setDoc(ref, db);
+    await setDoc(ref, sanitizeForFirestore(db));
   } catch (err) {
-    console.error("persist error:", err);
+    console.error('[persist] Firestore write FAILED — path:', err?.message || err);
   }
 };
 
