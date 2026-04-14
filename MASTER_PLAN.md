@@ -2,9 +2,9 @@
 
 **App:** WE TRACK (StatTracker)
 **Owner:** Whitt's End LLC
-**Last Updated:** April 2, 2026
-**Branch:** `dev`
-**Status:** Phase 2, Gate 2 — Org + Role Infrastructure (functionally complete, pending E2E test)
+**Last Updated:** April 14, 2026
+**Branch:** `main` / `dev`
+**Status:** Phase 2, Gate 5b complete — next up: Gate 6 (Scorebook Game Clock)
 
 > **How to use this document:** This is the single canonical reference for all architecture, feature design, and build planning. It supersedes all prior planning documents (`ARCHITECTURE.md`, `PHASE2_ARCHITECTURE.md`, `COMMUNICATION_PLAN.md`, `stattracker_monetization_and_features_planning.md`). Where those documents conflict, this document reflects the resolved decision or flags the conflict as an open question. Future Claude Code sessions should reference this document first.
 
@@ -43,9 +43,9 @@ WE TRACK is a mobile-first basketball stat tracking PWA built with React + Vite,
 
 NC travel basketball is the launch market — a tight-knit community where word-of-mouth matters. Self-registration supports organic growth without a manual provisioning bottleneck. The feature set is designed to match or exceed competing apps (Heja, SportsYou, TeamSnap) while being a better fit for travel basketball specifically (tournament readiness, official scorebook, stat depth).
 
-### Current Status Summary (as of April 2, 2026)
+### Current Status Summary (as of April 14, 2026)
 
-Phase 1 and 1.5 are fully complete: Firebase Firestore, anonymous auth, offline persistence, Manage/History/Reports tabs, scorebook UI fixes, data migration v3. Phase 2 Gate 1 (Google OAuth + account linking) is complete. Gate 2 (Org + Role Infrastructure) is functionally complete and pending final E2E test. Gates 3–8 are not started.
+Phase 1 and 1.5 are fully complete. Phase 2 Gates 1–5b are complete: Google OAuth, org + role infrastructure, coach invite flow, parent join codes + live read, post-tournament stability fixes, scorekeeper assignment + game lock (Gate 5a), and permissions schema + new roles (Gate 5b). Gate 6 (Scorebook Game Clock) is next.
 
 See [§7 — Build Phases](#7-build-phases) for full gate status and remaining work.
 
