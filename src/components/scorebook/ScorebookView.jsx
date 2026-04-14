@@ -4,6 +4,7 @@ import { fmtGameDate } from "../../utils/dates";
 import { deriveTeamStats, deriveOpponentStats } from "../../utils/scorebookEngine";
 import { clearLiveGame } from "../../utils/liveGame";
 import { claimLock, breakLock, subscribeAllLocks } from "../../utils/scorekeeperLock";
+import { getActiveOrgId } from "../../utils/storage";
 import GameSetup from "./GameSetup";
 import LiveScorebook from "./LiveScorebook";
 import SectionLabel from "../common/SectionLabel";
@@ -19,7 +20,10 @@ export default function ScorebookView({ db, updateDb, onLiveChange, user, userRo
   const [lockDocs, setLockDocs] = useState({}); // { [gameId]: lockData }
   const pendingLockClaimRef = useRef(false); // set to true when "Start Keeping Score" is confirmed
 
-  const orgId = userRole?.orgId || null;
+  // Resolve orgId from userRole first, then fall back to the localStorage key that
+  // storage.js uses — so claimLock/publishLiveGame always have a valid orgId even
+  // if userRole hasn't loaded yet when the component first renders.
+  const orgId = userRole?.orgId || getActiveOrgId(user?.uid) || null;
   const isHCOrAbove = userRole?.role === "owner" || userRole?.role === "headcoach";
 
   // Subscribe to all active locks for this org
@@ -36,7 +40,7 @@ export default function ScorebookView({ db, updateDb, onLiveChange, user, userRo
     setMode("setup");
   };
 
-  const onSetupComplete = (game) => {
+  const onSetupComplete = async (game) => {
     const newDb = { ...db, scorebookGames: [...db.scorebookGames, game] };
 
     // If loaded from a scheduled game, mark it as live
@@ -49,16 +53,20 @@ export default function ScorebookView({ db, updateDb, onLiveChange, user, userRo
       updateDb(newDb);
     }
 
-    // Claim the scorekeeper lock if this was a "Start Keeping Score" entry
+    // Claim the scorekeeper lock if this was a "Start Keeping Score" entry.
+    // Await the claim so the lock doc exists in Firestore before LiveScorebook
+    // mounts and subscribes — prevents a false "lock broken" on first snapshot.
     if (pendingLockClaimRef.current && user) {
       const gameOrgId = db.teams?.find(t => t.id === game.teamId)?.orgId || orgId;
       if (gameOrgId) {
-        claimLock(
-          gameOrgId,
-          game.id,
-          user.uid,
-          user.displayName || user.email || "Scorekeeper"
-        ).catch(() => {});
+        try {
+          await claimLock(
+            gameOrgId,
+            game.id,
+            user.uid,
+            user.displayName || user.email || "Scorekeeper"
+          );
+        } catch { /* non-fatal */ }
       }
       pendingLockClaimRef.current = false;
     }
@@ -67,7 +75,22 @@ export default function ScorebookView({ db, updateDb, onLiveChange, user, userRo
     setMode("live");
   };
 
-  const resumeGame = (gameId) => {
+  const resumeGame = async (gameId) => {
+    // Claim the lock if no active lock exists on this game.
+    // This handles both "resume after setup" and "tap to resume" on an unlocked
+    // in-progress game. If the lock claim fails it's non-fatal — the user still
+    // enters; the stale-lock timeout will clean up any ghost.
+    const lock = lockDocs[gameId];
+    const lockIsStale = lock && (Date.now() - new Date(lock.lastActivity).getTime()) > LOCK_STALE_MS;
+    const activeLock = lock && !lockIsStale;
+    const isMyLock = activeLock && lock.scorekeeperUid === user?.uid;
+
+    if (!activeLock && user && orgId) {
+      try {
+        await claimLock(orgId, gameId, user.uid, user.displayName || user.email || "Scorekeeper");
+      } catch { /* non-fatal */ }
+    }
+
     setActiveGameId(gameId);
     setMode("live");
   };
@@ -104,7 +127,10 @@ export default function ScorebookView({ db, updateDb, onLiveChange, user, userRo
   // Live scorebook takes over the full screen
   if (mode === "live" && activeGameId) {
     const activeGame = db.scorebookGames.find(g => g.id === activeGameId);
-    const gameOrgId = db.teams?.find(t => t.id === activeGame?.teamId)?.orgId || null;
+    // Teams don't carry orgId as a field — it's implicit from the Firestore path.
+    // Fall back to orgId from userRole so LiveScorebook always has a valid orgId
+    // for publishLiveGame, subscribeLock, updateHeartbeat, and releaseLock.
+    const gameOrgId = db.teams?.find(t => t.id === activeGame?.teamId)?.orgId || orgId;
     return (
       <LiveScorebook
         db={db}
@@ -175,8 +201,14 @@ export default function ScorebookView({ db, updateDb, onLiveChange, user, userRo
 
                   {/* CTA varies by assignment */}
                   {!sg.scorekeeperId && (
-                    // No assignment — any coach can load
-                    <div onClick={() => startNewGame(sg)} style={{ fontSize: 12, color: T.blue, fontWeight: 700 }}>LOAD ›</div>
+                    // No pre-assignment — route through confirmation so lock is claimed
+                    <button onClick={() => setConfirmStartGame(sg)} style={{
+                      background: `linear-gradient(135deg, ${T.orange}, #ea580c)`,
+                      color: "#fff", border: "none", borderRadius: 8,
+                      padding: "6px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer",
+                    }}>
+                      START KEEPING SCORE
+                    </button>
                   )}
                   {isMyGame && (
                     // This user is assigned — show Start Keeping Score
@@ -231,8 +263,8 @@ export default function ScorebookView({ db, updateDb, onLiveChange, user, userRo
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div
-                    onClick={() => (!isOthersLock || isHCOrAbove) && resumeGame(g.id)}
-                    style={{ flex: 1, cursor: isOthersLock && !isHCOrAbove ? "default" : "pointer" }}
+                    onClick={() => !isOthersLock && resumeGame(g.id)}
+                    style={{ flex: 1, cursor: isOthersLock ? "default" : "pointer" }}
                   >
                     <div style={{ fontWeight: 700, color: "#fff", fontSize: 15 }}>vs {g.opponent}</div>
                     <div style={{ fontSize: 12, color: "#444", marginTop: 2 }}>{fmtGameDate(g)}</div>
@@ -244,8 +276,8 @@ export default function ScorebookView({ db, updateDb, onLiveChange, user, userRo
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div
-                      onClick={() => (!isOthersLock || isHCOrAbove) && resumeGame(g.id)}
-                      style={{ textAlign: "right", cursor: isOthersLock && !isHCOrAbove ? "default" : "pointer" }}
+                      onClick={() => !isOthersLock && resumeGame(g.id)}
+                      style={{ textAlign: "right", cursor: isOthersLock ? "default" : "pointer" }}
                     >
                       <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22, fontWeight: 900, color: "#fff" }}>
                         {home.score} <span style={{ color: "#555" }}>-</span> {opp.score}
