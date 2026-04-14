@@ -7,6 +7,7 @@ import {
 } from "../../utils/scorebookEngine";
 import useAutosave from "../../hooks/useAutosave";
 import { getSyncStatus, onSyncStatusChange } from "../../utils/syncStatus";
+import { subscribeLock, releaseLock, updateHeartbeat } from "../../utils/scorekeeperLock";
 import GameHeader from "./GameHeader";
 import PlayerRow from "./PlayerRow";
 import OpponentStrip from "./OpponentStrip";
@@ -16,7 +17,7 @@ import EventLogPanel from "./EventLogPanel";
 import EndGameFlow from "./EndGameFlow";
 import { publishLiveGame, clearLiveGame } from "../../utils/liveGame";
 
-export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
+export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId, user }) {
   const initial = db.scorebookGames.find(g => g.id === gameId);
   const [game, setGame] = useState(initial);
   const [showSubFor, setShowSubFor] = useState(null);
@@ -28,10 +29,31 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
   const [assistMode, setAssistMode] = useState(null);
   const [isLive, setIsLive] = useState(false);
   const [syncStatus, setSyncStatus] = useState(getSyncStatus());
+  const [lockBroken, setLockBroken] = useState(false);
+  const [lockBrokenBy, setLockBrokenBy] = useState("");
+  const myLockRef = useRef(false);       // true if this user currently holds the lock
+  const heartbeatTimerRef = useRef(null);
+  const lastHeartbeatRef = useRef(0);    // timestamp of last successful heartbeat write
+  const HEARTBEAT_THROTTLE_MS = 30_000; // max 1 Firestore write per 30s (15-min inactivity threshold)
   const assistTimerRef = useRef(null);
 
   // Track network sync status
   useEffect(() => onSyncStatusChange(setSyncStatus), []);
+
+  // Subscribe to lock doc — detect if HC breaks the lock while we're scoring
+  useEffect(() => {
+    if (!orgId || !gameId) return;
+    return subscribeLock(orgId, gameId, (lock) => {
+      if (lock && lock.scorekeeperUid === user?.uid) {
+        myLockRef.current = true;
+      }
+      if (!lock && myLockRef.current) {
+        // Our lock was deleted externally (broken by HC)
+        setLockBrokenBy("Head Coach");
+        setLockBroken(true);
+      }
+    });
+  }, [orgId, gameId, user?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Autosave
   useAutosave(db, game);
@@ -92,6 +114,19 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
     const evt = createEvent(type, period, playerId, extras);
     setGame(g => ({ ...g, events: [...g.events, evt] }));
 
+    // Throttled heartbeat — triggered by activity but capped at 1 write per 30s.
+    // Proves the scorekeeper is still active without flooding the Firestore write queue.
+    if (orgId && gameId && myLockRef.current) {
+      if (heartbeatTimerRef.current) clearTimeout(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = setTimeout(() => {
+        const now = Date.now();
+        if (now - lastHeartbeatRef.current >= HEARTBEAT_THROTTLE_MS) {
+          updateHeartbeat(orgId, gameId);
+          lastHeartbeatRef.current = now;
+        }
+      }, 300);
+    }
+
     if (["2pt_made", "3pt_made"].includes(type) && playerId) {
       if (assistTimerRef.current) clearTimeout(assistTimerRef.current);
       setAssistMode({ scoringEventId: evt.id, scorerPlayerId: playerId });
@@ -99,7 +134,7 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
     }
 
     return evt;
-  }, [period]);
+  }, [period, orgId, gameId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const recordAssist = useCallback((assistPlayerId) => {
     if (!assistMode) return;
@@ -216,6 +251,7 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
       scheduledGames: updatedScheduled,
     });
     if (isLive && orgId) clearLiveGame(orgId).catch(() => {});
+    if (orgId && myLockRef.current) releaseLock(orgId, gameId).catch(() => {});
     onExit();
   };
 
@@ -347,6 +383,31 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId }) {
           borderRadius: 20, fontSize: 13, fontWeight: 600, zIndex: 100,
           border: `1px solid ${T.border}`,
         }}>{toast}</div>
+      )}
+
+      {/* Lock broken overlay — non-dismissible */}
+      {lockBroken && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 200,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          padding: 32, textAlign: "center",
+        }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>🔓</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 10 }}>
+            Scoring Lock Released
+          </div>
+          <div style={{ fontSize: 14, color: "#888", marginBottom: 32, lineHeight: 1.6 }}>
+            Your scorekeeper lock was removed by {lockBrokenBy}.<br />
+            Your stats are saved and will not be lost.
+          </div>
+          <button onClick={onExit} style={{
+            background: `linear-gradient(135deg, ${T.orange}, #ea580c)`,
+            color: "#fff", border: "none", borderRadius: 12,
+            padding: "14px 40px", fontSize: 15, fontWeight: 800, cursor: "pointer",
+          }}>
+            Exit Scorebook
+          </button>
+        </div>
       )}
 
       {/* Modals */}

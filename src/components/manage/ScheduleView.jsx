@@ -2,6 +2,7 @@ import { useState } from "react";
 import { T } from "../../utils/constants";
 import TournamentModal from "./TournamentModal";
 import GameModal from "./GameModal";
+import { getOrgMembers } from "../../utils/roles";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -40,7 +41,7 @@ const phaseBadge = (phase, bracketName, round) => {
   );
 };
 
-export default function ScheduleView({ db, updateDb }) {
+export default function ScheduleView({ db, updateDb, user, userRole }) {
   const [expandedTournId, setExpandedTournId] = useState(null);
   const [showTournamentModal, setShowTournamentModal] = useState(false);
   const [editingTournament, setEditingTournament] = useState(null);
@@ -49,6 +50,53 @@ export default function ScheduleView({ db, updateDb }) {
   const [gameModalTournId, setGameModalTournId] = useState(null);
   const [confirmDeleteTourn, setConfirmDeleteTourn] = useState(null);
   const [confirmDeleteGame, setConfirmDeleteGame] = useState(null); // { id, source }
+
+  // Scorekeeper assignment
+  const [assigningGame, setAssigningGame] = useState(null); // scheduled game being assigned
+  const [memberList, setMemberList] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  const canAssign = userRole?.role === "owner" || userRole?.role === "headcoach";
+  const orgId = userRole?.orgId || null;
+
+  const openAssignSheet = async (game) => {
+    setAssigningGame(game);
+    setMemberList([]);
+    if (!orgId) return;
+    setLoadingMembers(true);
+    try {
+      const members = await getOrgMembers(orgId);
+      // Exclude parents from scorekeeper assignment; show coaches only
+      setMemberList(members.filter(m => !m.removedAt && m.role !== "parent"));
+    } catch { /* non-fatal */ }
+    setLoadingMembers(false);
+  };
+
+  const assignScorekeeper = (member) => {
+    if (!assigningGame) return;
+    updateDb({
+      ...db,
+      scheduledGames: (db.scheduledGames || []).map(g =>
+        g.id === assigningGame.id
+          ? { ...g, scorekeeperId: member.uid, scorekeeperName: member.displayName || member.email || "Unknown" }
+          : g
+      ),
+    });
+    setAssigningGame(null);
+  };
+
+  const clearScorekeeper = () => {
+    if (!assigningGame) return;
+    updateDb({
+      ...db,
+      scheduledGames: (db.scheduledGames || []).map(g =>
+        g.id === assigningGame.id
+          ? { ...g, scorekeeperId: null, scorekeeperName: null }
+          : g
+      ),
+    });
+    setAssigningGame(null);
+  };
 
   const sectionLabel = (text) => (
     <div style={{ fontSize: 10, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8, marginTop: 20 }}>
@@ -139,30 +187,51 @@ export default function ScheduleView({ db, updateDb }) {
     const isLive = game.status === "live";
     const dotColor = isFinal ? T.green : isLive ? T.orange : "#555";
     const isConfirming = confirmDeleteGame?.id === game.id;
+    const isScheduledGame = game._source === "scheduled";
     return (
       <div style={{
-        display: "flex", alignItems: "center", gap: 10, padding: "9px 0",
-        borderBottom: `1px solid ${T.border}`,
+        padding: "9px 0", borderBottom: `1px solid ${T.border}`,
       }}>
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-        <div style={{ flex: 1, cursor: "pointer" }} onClick={onEdit}>
-          <div style={{ fontSize: 13, color: "#ddd", fontWeight: 600 }}>vs {game.opponent || game.awayOpponent || "TBD"}</div>
-          <div style={{ fontSize: 11, color: "#555" }}>{game.gameDate || game.date || "—"}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={onEdit}>
+            <div style={{ fontSize: 13, color: "#ddd", fontWeight: 600 }}>vs {game.opponent || game.awayOpponent || "TBD"}</div>
+            <div style={{ fontSize: 11, color: "#555" }}>{game.gameDate || game.date || "—"}</div>
+          </div>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            {phaseBadge(game.phase, game.bracketName, game.round)}
+            {isConfirming ? (
+              <>
+                <button onClick={() => deleteGame(confirmDeleteGame)} style={smallBtn(T.red)}>Delete</button>
+                <button onClick={() => setConfirmDeleteGame(null)} style={smallBtn("#444")}>✕</button>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: 12, color: "#444", cursor: "pointer" }} onClick={onEdit}>›</span>
+                <button onClick={e => { e.stopPropagation(); setConfirmDeleteGame({ id: game.id, source: game._source }); }} style={smallBtn("rgba(239,68,68,0.25)")}>🗑</button>
+              </>
+            )}
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          {phaseBadge(game.phase, game.bracketName, game.round)}
-          {isConfirming ? (
-            <>
-              <button onClick={() => deleteGame(confirmDeleteGame)} style={smallBtn(T.red)}>Delete</button>
-              <button onClick={() => setConfirmDeleteGame(null)} style={smallBtn("#444")}>✕</button>
-            </>
-          ) : (
-            <>
-              <span style={{ fontSize: 12, color: "#444", cursor: "pointer" }} onClick={onEdit}>›</span>
-              <button onClick={e => { e.stopPropagation(); setConfirmDeleteGame({ id: game.id, source: game._source }); }} style={smallBtn("rgba(239,68,68,0.25)")}>🗑</button>
-            </>
-          )}
-        </div>
+        {/* Scorekeeper assignment row — scheduled games only, HC+ only */}
+        {isScheduledGame && canAssign && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, paddingLeft: 18 }}>
+            {game.scorekeeperName ? (
+              <span style={{
+                fontSize: 10, color: T.blue, background: "rgba(59,130,246,0.1)",
+                border: "1px solid rgba(59,130,246,0.2)", borderRadius: 6, padding: "2px 7px",
+              }}>📋 {game.scorekeeperName}</span>
+            ) : (
+              <span style={{ fontSize: 10, color: "#444" }}>No scorekeeper</span>
+            )}
+            <button
+              onClick={e => { e.stopPropagation(); openAssignSheet(game); }}
+              style={{ fontSize: 10, color: "#555", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            >
+              {game.scorekeeperName ? "Change" : "Assign"}
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -273,6 +342,76 @@ export default function ScheduleView({ db, updateDb }) {
           onSave={saveGame}
           onClose={() => { setShowGameModal(false); setEditingGame(null); setGameModalTournId(null); }}
         />
+      )}
+
+      {/* Scorekeeper picker sheet */}
+      {assigningGame && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 60,
+          display: "flex", flexDirection: "column", justifyContent: "flex-end",
+        }} onClick={() => setAssigningGame(null)}>
+          <div style={{
+            background: "#111118", borderRadius: "20px 20px 0 0",
+            padding: "20px 16px", maxHeight: "70vh", overflowY: "auto",
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", marginBottom: 4 }}>
+              Assign Scorekeeper
+            </div>
+            <div style={{ fontSize: 12, color: "#555", marginBottom: 16 }}>
+              vs {assigningGame.opponent || "TBD"} · {assigningGame.gameDate || ""}
+            </div>
+
+            {loadingMembers && (
+              <div style={{ color: "#444", fontSize: 13, padding: "16px 0" }}>Loading members…</div>
+            )}
+
+            {!loadingMembers && memberList.map(m => {
+              const isAssigned = assigningGame.scorekeeperId === m.uid;
+              return (
+                <div key={m.uid} onClick={() => assignScorekeeper(m)} style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "12px 0", borderBottom: `1px solid ${T.border}`, cursor: "pointer",
+                }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+                    background: isAssigned ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 14, color: isAssigned ? T.blue : "#555",
+                    border: `1px solid ${isAssigned ? "rgba(59,130,246,0.4)" : T.border}`,
+                  }}>
+                    {(m.displayName || m.email || "?")[0].toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: isAssigned ? T.blue : "#ddd" }}>
+                      {m.displayName || m.email || "Unknown"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#555", textTransform: "capitalize" }}>{m.role}</div>
+                  </div>
+                  {isAssigned && <span style={{ fontSize: 11, color: T.blue }}>✓ Assigned</span>}
+                </div>
+              );
+            })}
+
+            {!loadingMembers && memberList.length === 0 && (
+              <div style={{ color: "#444", fontSize: 13, padding: "12px 0" }}>No eligible members found.</div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              {assigningGame.scorekeeperId && (
+                <button onClick={clearScorekeeper} style={{
+                  flex: 1, background: "rgba(239,68,68,0.1)", color: T.red,
+                  border: `1px solid rgba(239,68,68,0.3)`, borderRadius: 12,
+                  padding: "12px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                }}>Remove Assignment</button>
+              )}
+              <button onClick={() => setAssigningGame(null)} style={{
+                flex: 1, background: "rgba(255,255,255,0.06)", color: "#888",
+                border: `1px solid ${T.border}`, borderRadius: 12,
+                padding: "12px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              }}>Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

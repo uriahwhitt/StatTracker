@@ -5,12 +5,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { T } from '../../utils/constants';
 import { createInvite } from '../../utils/invites';
-import { getOrgMembers, updateMemberRole, removeRole } from '../../utils/roles';
+import { getOrgMembers, updateMemberRole, removeRole, updateMemberPermissions, defaultPermissions } from '../../utils/roles';
 
 const ROLE_LABELS = {
   owner: 'Owner',
   headcoach: 'Head Coach',
   assistantcoach: 'Asst. Coach',
+  manager: 'Manager',
+  staff: 'Staff',
   parent: 'Parent',
 };
 
@@ -18,10 +20,36 @@ const ROLE_COLORS = {
   owner: T.orange,
   headcoach: T.blue,
   assistantcoach: '#a78bfa',
+  manager: '#34d399',
+  staff: '#60a5fa',
   parent: '#888',
 };
 
-const CHANGEABLE_ROLES = ['headcoach', 'assistantcoach', 'parent'];
+// Roles that can be assigned via invite or role-change UI
+const CHANGEABLE_ROLES = ['headcoach', 'assistantcoach', 'manager', 'staff', 'parent'];
+
+// Which permission flags are grantable (toggleable) for each role.
+// "auto" permissions (always on for the role) are not shown here.
+// "—" permissions (never available for the role) are also not shown.
+const GRANTABLE_BY_ROLE = {
+  owner:          [],
+  headcoach:      [],
+  assistantcoach: ['roster', 'schedule', 'documents', 'tasks', 'equipment'],
+  manager:        ['scorebook', 'orgSettings'],
+  staff:          ['scorebook', 'roster', 'schedule', 'documents', 'tasks', 'compliance', 'equipment'],
+  parent:         ['scorebook'],
+};
+
+const PERMISSION_LABELS = {
+  scorebook:    'Scorekeeper',
+  roster:       'Roster Edits',
+  schedule:     'Schedule Edits',
+  documents:    'Documents',
+  tasks:        'Tasks',
+  compliance:   'Compliance',
+  equipment:    'Equipment',
+  orgSettings:  'Org Settings',
+};
 
 export default function MembersModal({ orgId, teamId, teamName, orgName, user, userRole, onClose }) {
   const [members, setMembers] = useState([]);
@@ -38,6 +66,8 @@ export default function MembersModal({ orgId, teamId, teamName, orgName, user, u
   const [working, setWorking] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [copied, setCopied] = useState(false);
+  const [expandedPermUid, setExpandedPermUid] = useState(null); // uid of member with open perms panel
+  const [permWorking, setPermWorking] = useState(false);
 
   const canManage = userRole?.role === 'owner' || userRole?.role === 'headcoach';
 
@@ -86,7 +116,9 @@ export default function MembersModal({ orgId, teamId, teamName, orgName, user, u
   const startChangeRole = (member) => {
     setContextMenuUid(null);
     setChangeRoleFor({ uid: member.uid, currentRole: member.role });
-    setNewRole(member.role === 'headcoach' ? 'assistantcoach' : 'headcoach');
+    // Default selection: pick something different from the current role
+    const others = CHANGEABLE_ROLES.filter(r => r !== member.role);
+    setNewRole(others[0] || 'assistantcoach');
     setConfirmHcTransfer(false);
   };
 
@@ -124,6 +156,25 @@ export default function MembersModal({ orgId, teamId, teamName, orgName, user, u
       setErrorMsg(err.message || 'Failed to remove member.');
     } finally {
       setWorking(false);
+    }
+  };
+
+  // ── Permission toggle ───────────────────────────────────────────────────────
+  const handleTogglePermission = async (member, permKey) => {
+    setPermWorking(true);
+    setErrorMsg('');
+    try {
+      const current = member.permissions ?? defaultPermissions(member.role);
+      const updated = { ...current, [permKey]: !current[permKey] };
+      await updateMemberPermissions(member.uid, orgId, updated);
+      // Update local state immediately so the toggle reflects without a reload
+      setMembers(prev => prev.map(m =>
+        m.uid === member.uid ? { ...m, permissions: updated } : m
+      ));
+    } catch (err) {
+      setErrorMsg(err.message || 'Failed to update permissions.');
+    } finally {
+      setPermWorking(false);
     }
   };
 
@@ -246,6 +297,15 @@ export default function MembersModal({ orgId, teamId, teamName, orgName, user, u
                             background: '#1a1a2e', border: `1px solid ${T.border}`,
                             borderRadius: 10, padding: '6px', minWidth: 160,
                           }}>
+                            {/* Permissions */}
+                            {(GRANTABLE_BY_ROLE[member.role] || []).length > 0 && (
+                              <button onClick={() => {
+                                setContextMenuUid(null);
+                                setExpandedPermUid(expandedPermUid === member.uid ? null : member.uid);
+                              }} style={menuItem}>
+                                Permissions
+                              </button>
+                            )}
                             {/* Change Role */}
                             {CHANGEABLE_ROLES.includes(member.role) && (
                               <button onClick={() => startChangeRole(member)} style={menuItem}>
@@ -268,6 +328,15 @@ export default function MembersModal({ orgId, teamId, teamName, orgName, user, u
                       </div>
                     )}
                   </div>
+
+                  {/* Permissions panel — shown when expanded via context menu */}
+                  {expandedPermUid === member.uid && canManage && (
+                    <PermissionsPanel
+                      member={member}
+                      onToggle={(key) => handleTogglePermission(member, key)}
+                      disabled={permWorking}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -360,7 +429,7 @@ export default function MembersModal({ orgId, teamId, teamName, orgName, user, u
 
                 {/* Role selector */}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-                  {['headcoach', 'assistantcoach', 'parent'].map(r => (
+                  {['headcoach', 'assistantcoach', 'manager', 'staff', 'parent'].map(r => (
                     <button key={r} onClick={() => setInviteRole(r)} style={{
                       background: inviteRole === r ? 'rgba(249,115,22,0.15)' : 'rgba(255,255,255,0.04)',
                       border: `1px solid ${inviteRole === r ? 'rgba(249,115,22,0.4)' : T.border}`,
@@ -432,4 +501,52 @@ function hexToRgb(hex) {
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   return `${r},${g},${b}`;
+}
+
+// ── Permissions Panel ─────────────────────────────────────────────────────────
+// Renders inside the member card when "Permissions" is tapped in the context menu.
+// Shows grantable permission toggles for the member's role.
+function PermissionsPanel({ member, onToggle, disabled }) {
+  const grantable = GRANTABLE_BY_ROLE[member.role] || [];
+  const perms = member.permissions ?? defaultPermissions(member.role);
+
+  if (grantable.length === 0) return null;
+
+  return (
+    <div style={{
+      borderTop: `1px solid ${T.border}`, marginTop: 10, paddingTop: 10,
+    }}>
+      <div style={{
+        fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+        letterSpacing: '0.08em', color: '#555', marginBottom: 8,
+      }}>
+        Extra Permissions
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {grantable.map(key => {
+          const active = perms[key] === true;
+          return (
+            <button
+              key={key}
+              onClick={() => !disabled && onToggle(key)}
+              disabled={disabled}
+              style={{
+                background: active ? 'rgba(249,115,22,0.12)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${active ? 'rgba(249,115,22,0.4)' : T.border}`,
+                color: active ? T.orange : '#555',
+                borderRadius: 20, padding: '4px 10px',
+                fontSize: 10, fontWeight: 700, cursor: disabled ? 'default' : 'pointer',
+                letterSpacing: '0.04em',
+              }}
+            >
+              {active ? '✓ ' : '+ '}{PERMISSION_LABELS[key] || key}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 10, color: '#444', marginTop: 6 }}>
+        Tap to grant or revoke. Changes take effect immediately.
+      </div>
+    </div>
+  );
 }
