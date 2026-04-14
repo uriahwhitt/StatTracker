@@ -268,7 +268,7 @@ Prerequisites: Gates 3, 4, and 7 must be complete.
 | Firebase Storage rules helpers (`isOrgCoach`, etc.) not yet in `firestore.rules` | Future — Phase 3 |
 | `storage.js` multi-org routing: `rolesSnap.docs[0].id` is non-deterministic for multi-org users | ⚠️ Known — fix before any multi-org user exists |
 | No owner notification badge for `pending_conflict` roles — owner must manually check Members modal | ⚠️ Known — Gate 8 |
-| Coach data scope (History/Reports filtered to assigned teamId) not yet enforced in UI | ⚠️ Known — Gate 5+ |
+| Coach data scope (History/Reports filtered to assigned teamId) not yet enforced in UI — Gates 5a/5b did not address this | ⚠️ Known — deferred to Gate 7+ |
 
 ---
 
