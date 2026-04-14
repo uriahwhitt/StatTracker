@@ -5,7 +5,6 @@
 import { useState, useEffect } from 'react';
 import { T } from '../../utils/constants';
 import { subscribeLiveGame } from '../../utils/liveGame';
-import { deriveBoxScore, deriveTeamStats, deriveOpponentStats } from '../../utils/scorebookEngine';
 
 export default function LiveGameView({ orgId, onClose }) {
   const [liveGame, setLiveGame] = useState(null);
@@ -19,16 +18,20 @@ export default function LiveGameView({ orgId, onClose }) {
     return unsub;
   }, [orgId]);
 
-  // ── Derived stats ─────────────────────────────────────────────────────────
-  const events = liveGame?.events || [];
-  const format = liveGame?.format || {};
+  // ── Derived stats — use pre-derived values from tablet to avoid 50-event truncation bug ──
+  const events = liveGame?.events || [];   // play-by-play feed only (last 50)
   const roster = liveGame?.roster || [];
-  const teamStats = deriveTeamStats(events, format);
-  const oppStats = deriveOpponentStats(events);
 
-  const boxScore = liveGame ? (() => {
-    try { return deriveBoxScore(events, roster); } catch { return []; }
-  })() : [];
+  // Box score built from pre-derived playerStats published by the tablet
+  const boxScore = liveGame ? (liveGame.playerStats || []).map(ps => {
+    const rosterEntry = roster.find(r => r.playerId === ps.playerId) || { playerId: ps.playerId, name: '?', jerseyNumber: '?' };
+    return { ...rosterEntry, stats: ps };
+  }).filter(row => row.stats) : [];
+
+  // Stale game safeguard — game not updated in >3 hours is considered potentially ended
+  const isStale = liveGame?.updatedAt &&
+    (Date.now() - new Date(liveGame.updatedAt).getTime()) > 3 * 60 * 60 * 1000;
+  const effectivelyLive = liveGame?.isLive && !isStale;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -51,9 +54,9 @@ export default function LiveGameView({ orgId, onClose }) {
         }}>← Back</button>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: liveGame?.isLive ? T.green : '#444' }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: liveGame?.isLive ? T.green : '#444', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              {liveGame?.isLive ? 'Live' : 'Ended'}
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: effectivelyLive ? T.green : '#444' }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: effectivelyLive ? T.green : '#444', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              {effectivelyLive ? 'Live' : isStale ? 'Possibly Ended' : 'Ended'}
             </span>
           </div>
         </div>
@@ -79,20 +82,25 @@ export default function LiveGameView({ orgId, onClose }) {
               <div>
                 <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>{liveGame.teamName || 'Home'}</div>
                 <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 52, fontWeight: 900, color: '#fff', lineHeight: 1 }}>
-                  {teamStats.score ?? 0}
+                  {liveGame.homeScore ?? 0}
                 </div>
               </div>
               <div style={{ fontSize: 20, color: '#333', fontWeight: 900 }}>—</div>
               <div>
                 <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>{liveGame.opponent || 'Away'}</div>
                 <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 52, fontWeight: 900, color: '#fff', lineHeight: 1 }}>
-                  {oppStats.score ?? 0}
+                  {liveGame.awayScore ?? 0}
                 </div>
               </div>
             </div>
             {liveGame.period && (
               <div style={{ fontSize: 12, color: '#555', marginTop: 10 }}>
                 Period {liveGame.period}
+              </div>
+            )}
+            {isStale && (
+              <div style={{ fontSize: 11, color: '#666', marginTop: 10 }}>
+                Game may have ended — last update was {new Date(liveGame.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </div>
             )}
           </div>

@@ -10,6 +10,7 @@ export default function GameHeader({
   homeTimeouts,
   onUndo, onGroupSub, onEventLog, onEndGame,
   onTeamTechFoul, onHomeTimeout,
+  standbyCount = 0,
 }) {
   const [periodSelectorOpen, setPeriodSelectorOpen] = useState(false);
 
@@ -150,7 +151,16 @@ export default function GameHeader({
       {/* Action buttons row */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
         <button onClick={onUndo} style={btnStyle("rgba(239,68,68,0.4)", "1px solid rgba(239,68,68,0.6)")}>UNDO</button>
-        <button onClick={onGroupSub} style={btnStyle("rgba(34,197,94,0.4)", "1px solid rgba(34,197,94,0.6)")}>SUB</button>
+        <div style={{ position: "relative", display: "inline-flex" }}>
+          <button onClick={onGroupSub} style={btnStyle("rgba(34,197,94,0.4)", "1px solid rgba(34,197,94,0.6)")}>SUB</button>
+          {standbyCount > 0 && (
+            <div style={{
+              position: "absolute", top: -4, right: -4,
+              width: 8, height: 8, borderRadius: "50%",
+              background: "#F59E0B", border: "1px solid #0a0a0f",
+            }} />
+          )}
+        </div>
         <button onClick={onHomeTimeout} style={btnStyle("rgba(255,255,255,0.15)", `1px solid rgba(255,255,255,0.25)`)}>TO</button>
         <button onClick={onTeamTechFoul} style={btnStyle("rgba(239,68,68,0.25)", "1px solid rgba(239,68,68,0.45)")}>TF</button>
         <button onClick={onEventLog} style={btnStyle("rgba(255,255,255,0.15)", `1px solid rgba(255,255,255,0.25)`)}>LOG</button>

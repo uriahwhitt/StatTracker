@@ -67,7 +67,7 @@ The following decisions are final across all phases.
 | **Data path routing** | Personal path (`users/{uid}/data/db`) when no org role; org path (`orgs/{orgId}/data/db`) when org role exists. One-time migration on first org join. |
 | **Player entity is universal join point** | Players start as anonymous placeholders created by coaches. Claimed by verified users. UID persists across team and org transfers. All stats, DMs, and calendar history follow the UID. |
 | **No miss buttons** | Made-only stat entry. Corrections via undo / event log delete. |
-| **Autosave** | Continuous 300ms debounced write to Firestore on every game state change. |
+| **Autosave** | Dual-rate debounce: 300ms for roster/manage edits; 45s during live scorebook games. localStorage is always written first on every change as the crash-safe backup — Firestore sync is for cross-device visibility, not crash recovery. |
 | **Assist flow** | 2-second auto-dismiss after scoring event. |
 | **Tournament scope** | Tournaments are global — not org-owned. `createdByOrgId` is nullable. |
 | **IDs** | All IDs are UUID strings. Compatible with both localStorage and Firestore document IDs. |
@@ -563,7 +563,8 @@ T.red     = "#ef4444"                    // errors, fouls, danger
 
 #### Core Behavior (Locked)
 - Event-sourced: tap-to-record only. No miss buttons. Undo via event log delete.
-- Autosave: 300ms debounced write on every state change.
+- Autosave: 300ms debounce for roster/manage edits; 45s during live games. localStorage written immediately on every change as crash-safe backup.
+- Live game publishing: all player stats are pre-derived from the full event log on the tablet and published as `playerStats[]`. The `events` field in the live doc contains only the last 50 events for the play-by-play feed. `LiveGameView` consumes `playerStats[]` directly — never re-derives from the truncated event slice.
 - Period-aware foul and timeout derivation — counts reset correctly per `foulResetPeriod` setting.
 - Jersey override per game (from GameSetup, overrides team roster default).
 
@@ -1460,28 +1461,37 @@ Transfer code to coach device. Coach validates History + Reports read-only.
 
 **Remaining:** E2E test — personal stat data accessible under org path from both devices after org creation; security rules block access without role; Manage tab reflects org data immediately after creation (no reload).
 
-#### Gate 3 — Coach Invite Flow ⬜ NOT STARTED
+#### Gate 3 — Coach Invite Flow ✅ COMPLETE
 
 - `/invites/{token}` collection + TTL logic
 - Manage → Team → Members → "Add Coach" flow (generates invite link)
 - Invite acceptance: open link → Google sign-in → role written → team context loaded
 - History + Reports scoped to coach's assigned team
-- Coach cannot access other teams in the org
-- Assign Head Coach role to Coach Corey via invite link
+- Head Coach conflict detection → `pending_conflict` status + owner notification doc
+- Role transfer, soft-removal (removedAt/removedBy), self-removal guard
 
-**Test condition:** Beta coach accepts invite link, lands in app, sees History + Reports for their team only. Cannot access other teams or the Manage tab.
+**Test condition:** ✅ Verified — HC invite accepted, conflict detected and resolved, all three role levels see correct data.
 
-#### Gate 4 — Parent Join Codes + Live Read ⬜ NOT STARTED
+#### Gate 4 — Parent Join Codes + Live Read ✅ COMPLETE
 
 - `/joinCodes/{code}` collection
-- Manage → Team → "Parent Join Code" UI (display, QR, regenerate)
-- Settings → "Join a Team" text entry
-- Google sign-in prompt at join code entry for anonymous users
-- Parent role written on join code use
-- Firestore `onSnapshot` listener for live game score + box score
-- Read-only live game view for Parent and Coach during active locked game
+- Manage → Team → "Parent Join Code" UI (display, copy, regenerate)
+- Settings → "Join a Team" text entry + Google sign-in prompt for anonymous users
+- Parent role written on join code redemption; role-based nav applied
+- Firestore `onSnapshot` live game doc at `orgs/{orgId}/live/game`
+- Read-only `LiveGameView` (box score + play-by-play feed); `LiveGameBanner` (pulsing indicator)
+- Go Live is coach-controlled; explicit Stop button clears the doc
 
-**Test condition:** Join own team with test parent account. During active locked game, parent sees live score updates within 2 seconds of stat entry.
+**Post-tournament fixes applied (April 6, 2026):**
+- Autosave throttled to 45s during live games (see §3.1 and architectural decisions)
+- Sync status dot + offline warning banner in the Go Live bar (`src/utils/syncStatus.js`)
+- Box score bug fixed: player stats pre-derived on tablet, published as `playerStats[]`; `LiveGameView` no longer re-derives from the 50-event truncated feed
+- Stale game safeguard in `LiveGameView`: games not updated in >3h show "Possibly Ended" + last-update time
+- "End Broadcast" recovery button on finalized games in `ScorebookView`
+- Active roster sorted by jersey number in `LiveScorebook` (display only; game logic unchanged)
+- Two-phase group sub standby queue: pre-queue bench players in amber before dead ball; auto-fill on deselect; amber badge on SUB button when queue is pending
+
+**Test condition:** ✅ Gate 4 verified April 2, 2026. Post-tournament fixes verified April 6, 2026.
 
 #### Gate 5 — Scorekeeper Role + Org Membership Management ⬜ NOT STARTED
 
@@ -1606,6 +1616,9 @@ See §4 for full specifications.
 | `migratePersonalDataToOrg` silently skipped writing if any previous migration existed | ✅ Fixed |
 | Org creation UI visible to all authenticated users | ✅ Fixed (superadmin guard) |
 | `isSuperadmin()` in rules uses custom claim correctly | ✅ Verified in `firestore.rules` |
+| Autosave (300ms) flooded Firestore write queue during live games on unstable wifi — write queue exhausted, data stranded in localStorage | ✅ Fixed — 45s throttle in `useAutosave.js` when `game.status === 'live'` |
+| `LiveGameView` box score wrong for games >50 events — stats re-derived from truncated event slice | ✅ Fixed — stats pre-derived on tablet and published as `playerStats[]` |
+| Live broadcast not auto-clearing on game finalization — banner stuck on parent devices | ✅ Fixed — `LiveGameBanner` uses `onSnapshot` (auto-hides on doc delete); "End Broadcast" recovery button in `ScorebookView` |
 | `loadDb` migration flag (`hasRunMigration_v3`) writes to localStorage only — won't re-run if user clears browser storage | Minor — acceptable for now |
 | `storage.js:72` multi-org routing — `rolesSnap.docs[0].id` returns whichever org Firestore serves first; non-deterministic for users with multiple org memberships | ⚠️ Known — fix before any multi-org user exists |
 

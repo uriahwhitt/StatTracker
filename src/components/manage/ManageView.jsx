@@ -26,7 +26,7 @@ export default function ManageView({ db, updateDb, user, userRole, isSuperadminU
       </div>
 
       {segment === "people" && <PeopleView db={db} updateDb={updateDb} user={user} userRole={userRole} isSuperadminUser={isSuperadminUser} />}
-      {segment === "schedule" && <ScheduleView db={db} updateDb={updateDb} />}
+      {segment === "schedule" && <ScheduleView db={db} updateDb={updateDb} user={user} userRole={userRole} />}
     </div>
   );
 }

@@ -20,6 +20,7 @@ import LiveGameView from "./components/live/LiveGameView";
 import { useAuthUser, isSuperadmin } from "./utils/auth";
 import { getAllUserRoles } from "./utils/roles";
 import { subscribeLiveGame } from "./utils/liveGame";
+import { initSyncStatus } from "./utils/syncStatus";
 
 // ── One-time data migration (v3) ──────────────────────────────────────────────
 const runMigrationV3 = () => {
@@ -71,19 +72,17 @@ export default function App() {
   return <AppMain />;
 }
 
-// ── Role-based visible tabs ───────────────────────────────────────────────────
-const TABS_COACH    = ["scorebook", "history", "reports", "manage"];
-const TABS_PARENT   = ["history", "reports", "manage"];
+// ── Permission-based visible tabs (Gate 5b) ───────────────────────────────────
+const TABS_WITH_SCOREBOOK    = ["scorebook", "history", "reports", "manage"];
+const TABS_WITHOUT_SCOREBOOK = ["history", "reports", "manage"];
 
 function getVisibleTabs(role) {
-  if (!role) return TABS_COACH; // owner/superadmin — no org role doc but full access
-  switch (role.role) {
-    case "owner":         return TABS_COACH;
-    case "headcoach":     return TABS_COACH;
-    case "assistantcoach":return TABS_COACH;
-    case "parent":        return TABS_PARENT;
-    default:              return TABS_COACH;
-  }
+  if (!role) return TABS_WITH_SCOREBOOK; // superadmin — no org role doc, full access
+  // Use permissions.scorebook if the doc has it (Gate 5b+).
+  // Fall back to role check for legacy member docs without a permissions object.
+  const hasScorebookPerm = role.permissions?.scorebook
+    ?? ['owner', 'headcoach', 'assistantcoach'].includes(role.role);
+  return hasScorebookPerm ? TABS_WITH_SCOREBOOK : TABS_WITHOUT_SCOREBOOK;
 }
 
 // ── Main app ──────────────────────────────────────────────────────────────────
@@ -119,6 +118,9 @@ function AppMain() {
   const [scorebookLive, setScorebookLive] = useState(false);
 
   // ── ALL effect hooks (must run unconditionally, every render) ───────────────
+
+  // Initialize network sync status monitor once on mount
+  useEffect(() => { initSyncStatus(); }, []);
 
   useEffect(() => {
     if (!user || user.isAnonymous) return;
@@ -413,7 +415,7 @@ function AppMain() {
         )}
 
         {view === "scorebook" && visibleTabs.includes("scorebook") && (
-          <ScorebookView db={db} updateDb={updateDb} onLiveChange={handleScorebookLiveChange} />
+          <ScorebookView db={db} updateDb={updateDb} onLiveChange={handleScorebookLiveChange} user={user} userRole={userRole} />
         )}
 
         {view === "history" && (

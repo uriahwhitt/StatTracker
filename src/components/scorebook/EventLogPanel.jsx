@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { T } from "../../utils/constants";
 import { formatEventDescription } from "../../utils/scorebookEngine";
 
 export default function EventLogPanel({ events, roster, format, onDelete, onClose }) {
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
   const sorted = [...events].reverse();
 
   const periodLabel = (period) => {
@@ -50,11 +52,24 @@ export default function EventLogPanel({ events, roster, format, onDelete, onClos
               </div>
             </div>
             {!e.deleted && (
-              <button onClick={() => onDelete(e.id)} style={{
-                background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
-                color: T.red, borderRadius: 6, padding: "4px 8px", fontSize: 10, fontWeight: 700,
-                cursor: "pointer", flexShrink: 0,
-              }}>DEL</button>
+              pendingDeleteId === e.id ? (
+                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                  <button onClick={() => { onDelete(e.id); setPendingDeleteId(null); }} style={{
+                    background: T.red, border: "none", color: "#fff",
+                    borderRadius: 6, padding: "4px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer",
+                  }}>Delete</button>
+                  <button onClick={() => setPendingDeleteId(null)} style={{
+                    background: "rgba(255,255,255,0.08)", border: `1px solid ${T.border}`,
+                    color: "#888", borderRadius: 6, padding: "4px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer",
+                  }}>✕</button>
+                </div>
+              ) : (
+                <button onClick={() => setPendingDeleteId(e.id)} style={{
+                  background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
+                  color: T.red, borderRadius: 6, padding: "4px 8px", fontSize: 10, fontWeight: 700,
+                  cursor: "pointer", flexShrink: 0,
+                }}>DEL</button>
+              )
             )}
           </div>
         ))}

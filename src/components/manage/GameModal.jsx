@@ -24,8 +24,8 @@ export default function GameModal({ db, game, defaultTournamentId, onSave, onClo
     };
 
     if (isFinalized) {
-      // Retroactive edit: only allow updating tournament/phase/bracket/round/status
-      onSave({ ...base, _source: "scorebook" });
+      // Retroactive edit: stats are untouched; all metadata fields are editable except team
+      onSave({ ...base, opponent: opponent.trim() || "TBD", gameDate, _source: "scorebook" });
     } else {
       onSave({
         ...base,
@@ -33,6 +33,8 @@ export default function GameModal({ db, game, defaultTournamentId, onSave, onClo
         teamId,
         opponent: opponent.trim() || "TBD",
         gameDate,
+        scorekeeperId:   game?.scorekeeperId   ?? null,
+        scorekeeperName: game?.scorekeeperName ?? null,
         _source: game?._source || "scheduled",
       });
     }
@@ -69,7 +71,7 @@ export default function GameModal({ db, game, defaultTournamentId, onSave, onClo
 
         {isFinalized && (
           <div style={{ background: "rgba(59,130,246,0.08)", border: `1px solid rgba(59,130,246,0.2)`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: T.blue, fontWeight: 600 }}>Finalized scorebook game — only tournament/phase fields can be updated.</div>
+            <div style={{ fontSize: 12, color: T.blue, fontWeight: 600 }}>Finalized scorebook game — team cannot be changed. All other fields are editable.</div>
           </div>
         )}
 
@@ -85,20 +87,16 @@ export default function GameModal({ db, game, defaultTournamentId, onSave, onClo
         )}
 
         {/* Opponent */}
-        {!isFinalized && (
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Opponent</label>
-            <input value={opponent} onChange={e => setOpponent(e.target.value)} placeholder="Opponent team name…" style={{ fontSize: 15 }} />
-          </div>
-        )}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Opponent</label>
+          <input value={opponent} onChange={e => setOpponent(e.target.value)} placeholder="Opponent team name…" style={{ fontSize: 15 }} />
+        </div>
 
         {/* Date */}
-        {!isFinalized && (
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Date</label>
-            <input type="date" value={gameDate} onChange={e => setGameDate(e.target.value)} style={{ fontSize: 14 }} />
-          </div>
-        )}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Date</label>
+          <input type="date" value={gameDate} onChange={e => setGameDate(e.target.value)} style={{ fontSize: 14 }} />
+        </div>
 
         {/* Tournament */}
         <div style={{ marginBottom: 14 }}>

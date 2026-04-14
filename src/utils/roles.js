@@ -1,10 +1,71 @@
-// ── Role resolution helpers — Phase 2 Gate 2 / Gate 3 ─────────────────────────
+// ── Role resolution helpers — Phase 2 Gate 2 / Gate 3 / Gate 5b ────────────────
 // Exports: getUserRole, canWrite, getOrgForUser, getRoleStatus,
-//          writeRoleDoc, removeRole, updateMemberRole,
-//          getOrgMembers
+//          writeRoleDoc, removeRole, updateMemberRole, updateMemberPermissions,
+//          defaultPermissions, getOrgMembers, getAllUserRoles
 
 import { db as firestoreDb } from '../firebase';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
+
+// ── Permission defaults (Gate 5b) ─────────────────────────────────────────────
+// Returns the full permissions object for a role. Stored on the member doc at
+// creation time. Individual flags can be toggled by owner or headcoach without
+// changing the member's primary role.
+//
+// "auto" = true by default (matches role); "grantable" = false by default but
+// can be toggled on. "—" = false and the UI hides the toggle entirely.
+export const defaultPermissions = (role) => {
+  switch (role) {
+    case 'owner':
+      return {
+        scorebook: true, roster: true, schedule: true, members: true,
+        documents: true, tasks: true, compliance: true, reports: true,
+        messaging: true, financials: true, equipment: true,
+        seasonConfig: true, orgSettings: true,
+      };
+    case 'headcoach':
+      return {
+        scorebook: true, roster: true, schedule: true, members: true,
+        documents: true, tasks: true, compliance: true, reports: true,
+        messaging: true, financials: false, equipment: true,
+        seasonConfig: false, orgSettings: false,
+      };
+    case 'assistantcoach':
+      return {
+        scorebook: true, roster: false, schedule: false, members: false,
+        documents: false, tasks: false, compliance: false, reports: true,
+        messaging: true, financials: false, equipment: false,
+        seasonConfig: false, orgSettings: false,
+      };
+    case 'manager':
+      return {
+        scorebook: false, roster: true, schedule: true, members: true,
+        documents: true, tasks: true, compliance: true, reports: true,
+        messaging: true, financials: true, equipment: true,
+        seasonConfig: true, orgSettings: false,
+      };
+    case 'staff':
+      return {
+        scorebook: false, roster: false, schedule: false, members: false,
+        documents: false, tasks: false, compliance: false, reports: true,
+        messaging: true, financials: false, equipment: false,
+        seasonConfig: false, orgSettings: false,
+      };
+    case 'parent':
+      return {
+        scorebook: false, roster: false, schedule: false, members: false,
+        documents: false, tasks: false, compliance: false, reports: true,
+        messaging: true, financials: false, equipment: false,
+        seasonConfig: false, orgSettings: false,
+      };
+    default:
+      return {
+        scorebook: false, roster: false, schedule: false, members: false,
+        documents: false, tasks: false, compliance: false, reports: false,
+        messaging: false, financials: false, equipment: false,
+        seasonConfig: false, orgSettings: false,
+      };
+  }
+};
 
 // Get the active role document for a user in a specific org.
 // Returns null if the user has no role or if the role has been soft-removed.
@@ -59,12 +120,15 @@ export const getRoleStatus = async (uid, orgId) => {
 // Also writes a denormalized member doc to orgs/{orgId}/members/{uid} when
 // memberProfile is provided — required for the Members list UI.
 // memberProfile: { displayName, email, photoURL }
+// Permissions are computed from roleData.role unless roleData.permissions is
+// already set (allows callers to supply explicit overrides).
 export const writeRoleDoc = async (uid, orgId, roleData, memberProfile) => {
   const fullRole = {
     status: 'active',
     removedAt: null,
     removedBy: null,
     ...roleData,
+    permissions: roleData.permissions ?? defaultPermissions(roleData.role),
   };
   await setDoc(doc(firestoreDb, `users/${uid}/roles/${orgId}`), fullRole);
   if (memberProfile) {
@@ -89,7 +153,7 @@ export const removeRole = async (uid, orgId, removedByUid) => {
 };
 
 // Update a member's role (for role transfer / change role).
-// Also writes an audit log entry.
+// Resets permissions to the defaults for the new role.
 export const updateMemberRole = async (uid, orgId, newRole, updatedByUid) => {
   const now = new Date().toISOString();
   const update = {
@@ -97,7 +161,16 @@ export const updateMemberRole = async (uid, orgId, newRole, updatedByUid) => {
     status: 'active',
     grantedByUid: updatedByUid,
     grantedAt: now,
+    permissions: defaultPermissions(newRole),
   };
+  await updateDoc(doc(firestoreDb, `users/${uid}/roles/${orgId}`), update);
+  await updateDoc(doc(firestoreDb, `orgs/${orgId}/members/${uid}`), update).catch(() => {});
+};
+
+// Update only the permissions object for a member (owner/HC permission toggles).
+// Writes to both the user role doc and the denormalized member doc.
+export const updateMemberPermissions = async (uid, orgId, permissions) => {
+  const update = { permissions };
   await updateDoc(doc(firestoreDb, `users/${uid}/roles/${orgId}`), update);
   await updateDoc(doc(firestoreDb, `orgs/${orgId}/members/${uid}`), update).catch(() => {});
 };
