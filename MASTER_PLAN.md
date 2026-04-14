@@ -103,24 +103,44 @@ Super Admin (platform operator — no org/team ownership)
 |---|---|---|---|---|---|---|
 | **Superadmin** | System-wide | Full | Full | Full | Full | Platform operator only. Custom claim. |
 | **Org Owner / Admin** | One org | Full | Full | Full | Full | Paying customer. All teams in org. Creates teams. |
-| **Org Staff** | One org (no team) | TBD | None | Full | Full | Org-level, `teamId: null`. Finance, admin, and future sub-roles. Gate 5. |
+| **Manager** | One org (no team) | Admin + finance + season config | Grantable | Full | Full | Org-level admin role. `teamId: null`. Covers scheduling, compliance, financials. Gate 5b. |
+| **Staff** | Team or org | Grantable per flag | Grantable | Full | Full | Ground-level ops. Equipment manager, team volunteer, trusted parent on game day. Gate 5b. |
 | **Head Coach** | One team | Team roster + members | Full | Full | Full | Can assign roles, generate join codes, break game locks. Cannot create teams. |
-| **Assistant Coach** | One team | None | Full | Full | Full | No role management. |
-| **Scorekeeper** | One game | None | Input only (locked game) | None | None | Temp per-game assignment. |
-| **Parent** | One team | Read-only roster | Live read-only | Full | Full | Joins via reusable 6-character join code. Google account required. |
+| **Assistant Coach** | One team | Grantable per flag | Full | Full | Full | No role management by default. Individual flags grantable. |
+| **Scorekeeper** | One game | None | Input only (locked game) | None | None | Not a standing role — scorebook access gated by `permissions.scorebook` flag. |
+| **Parent** | One team | Read-only roster | Grantable | Full | Full | Joins via reusable 6-character join code. Google account required. |
 
 ### 2.4 Role Storage
 
 ```
 // Standing roles — subcollection, orgId is the document ID
 users/{uid}/roles/{orgId} = {
-  role: "owner" | "headcoach" | "assistantcoach" | "parent",
-  teamId: string | null,              // null for owner (org-wide), teamId for coach/parent
+  role: "owner" | "headcoach" | "assistantcoach" | "manager" | "staff" | "parent",
+  teamId: string | null,              // null for owner/manager (org-wide), teamId for coaches/staff/parent
   grantedByUid: string,
   grantedAt: string,                  // ISO timestamp
   status: "active" | "pending_conflict",  // pending_conflict = accepted HC invite but HC already exists
   removedAt: string | null,           // null = active; set on soft-removal
   removedBy: string | null,           // uid of user who performed the removal
+
+  // Gate 5b — explicit permission flags. Computed from role at creation via
+  // defaultPermissions(role) in roles.js. Individual flags grantable by owner/HC.
+  permissions: {
+    scorebook:    boolean,  // Scorebook tab visible + can score games
+    roster:       boolean,  // Add/edit/remove players on assigned team
+    schedule:     boolean,  // Create/edit scheduled games + tournaments
+    members:      boolean,  // Invite/remove team members
+    documents:    boolean,  // View + verify player document uploads (Doc Vault)
+    tasks:        boolean,  // Create + assign compliance tasks
+    compliance:   boolean,  // Org-wide compliance dashboard
+    reports:      boolean,  // Generate PDF/JSON exports
+    messaging:    boolean,  // Team group chat + direct messages
+    financials:   boolean,  // Financial records (future)
+    equipment:    boolean,  // Jersey registry + equipment management (future)
+    seasonConfig: boolean,  // Configure season settings (future)
+    orgSettings:  boolean,  // Modify org profile + global settings (future)
+    // billing — never stored; always derived from role === "owner"
+  }
 }
 ```
 
@@ -128,6 +148,8 @@ Denormalized mirror doc (written alongside every role write, enables member list
 ```
 orgs/{orgId}/members/{uid} = { uid, displayName, email, photoURL, ...same fields as role doc }
 ```
+
+`defaultPermissions(role)` in `src/utils/roles.js` is the single source of truth for which flags are `true` by default for each role. See `IMPLEMENTATION_STATUS.md §Gate 5b` for the full default matrix.
 
 ### 2.5 Auth Strategy — Dual Mode (Permanent)
 
@@ -474,7 +496,9 @@ db = {
 
 /orgs/{orgId}/data/db
   read:  user has any role in orgId
-  write: user is headcoach or above (not assistant, not parent), OR superadmin
+  write: user has permissions.scorebook == true on their member doc (Gate 5b),
+         OR role is owner/headcoach/assistantcoach (legacy fallback for pre-5b docs),
+         OR superadmin
 
 // Player profiles
 /players/{playerId}

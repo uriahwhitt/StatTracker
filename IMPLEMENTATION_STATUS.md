@@ -1,12 +1,13 @@
 # WE TRACK — Implementation Status
-**Date:** April 7, 2026 | **Branch:** `feat/gate-5a`
+**Date:** April 14, 2026 | **Branch:** `main` / `dev`
 
 ---
 
 ## Current Position in Build Sequence
 
-**At:** Phase 2, Gate 5b — Org Membership Panel + New Roles (not yet started)
-**Last completed:** Gate 5a — Scorekeeper Assignment + Game Lock ✅ (April 7, 2026)
+**At:** Phase 2, Gate 6 — Scorebook Game Clock (not yet started)
+**Last completed:** Gate 5b — Permissions Schema + New Roles ✅ (April 14, 2026)
+**Gate 5a completed:** Scorekeeper Assignment + Game Lock ✅ (April 7, 2026)
 **Gate 4 completed:** Parent Join Codes + Live Read ✅ (April 2, 2026)
 
 ---
@@ -162,15 +163,49 @@ Implemented on branch `fix/tournament-issues`. Root causes and UX issues surface
 - HC breaks lock → displaced scorekeeper sees full-screen overlay immediately
 - Finalize game → lock doc deleted from Firestore
 
-### Gate 5b — Org Membership Panel + New Roles ⬜ NOT STARTED
+### Gate 5b — Permissions Schema + New Roles ✅ COMPLETE (April 14, 2026)
 
-**5b — Org Membership Management + New Roles**
-- `Org Staff` role (`role: 'orgstaff', teamId: null`) — org-level, no specific team
-- `staffRole` sub-field for future specialization (finance, admin, operations, etc.)
-- Org Members Panel in Manage → PeopleView: all org members grouped by team + org-level members
-- Transfer Ownership flow: promote member to co-owner → original owner steps down to Org Staff or leaves
-- Firestore rules: `orgstaff` handled by existing `hasOrgRole` helper (no changes needed)
-- Foundation for future financial features (player dues, payment tracking) and non-coaching admin roles
+| Item | Status |
+|---|---|
+| `defaultPermissions(role)` in `roles.js` — 13-flag permissions object (scorebook, roster, schedule, members, documents, tasks, compliance, reports, messaging, financials, equipment, seasonConfig, orgSettings) | ✅ Done |
+| `manager` and `staff` primary roles added to role enum, labels, colors, invite selector, change role picker | ✅ Done |
+| `writeRoleDoc` stores permissions object at member creation time (computed from role, overrideable) | ✅ Done |
+| `updateMemberRole` resets permissions to new role defaults on role change | ✅ Done |
+| `updateMemberPermissions()` — new export for per-flag toggles without role change | ✅ Done |
+| `App.jsx` `getVisibleTabs` uses `permissions.scorebook` flag (legacy fallback for pre-5b docs) | ✅ Done |
+| `firestore.rules` — `hasScorebookPerm()` helper; `data/db` write gated on `permissions.scorebook` with legacy role fallback | ✅ Done |
+| `MembersModal.jsx` — "Permissions" context menu option opens inline panel with grantable permission toggles per member | ✅ Done |
+
+**Architecture decisions locked (Gate 5b):**
+- All 13 permission flags stored explicitly on every member doc at creation; no runtime derivation
+- `defaultPermissions(role)` is the single source of truth for what each role gets by default
+- Any flag can be toggled by owner or head coach without changing the member's primary role
+- Firestore rules use `permissions.scorebook` for `data/db` writes; other flags enforced as each feature ships
+- Legacy member docs (pre-Gate 5b) fall back to role-name check in `hasScorebookPerm` — no migration required
+- `billing` is never stored as a flag — always derived from `role === 'owner'`
+
+**Default permission matrix:**
+
+| Permission | owner | headcoach | assistantcoach | manager | staff | parent |
+|---|---|---|---|---|---|---|
+| scorebook | auto | auto | auto | grantable | grantable | grantable |
+| roster | auto | auto | grantable | auto | grantable | — |
+| schedule | auto | auto | grantable | auto | grantable | — |
+| members | auto | auto | — | auto | — | — |
+| documents | auto | auto | grantable | auto | grantable | — |
+| tasks | auto | auto | grantable | auto | grantable | — |
+| compliance | auto | auto | — | auto | grantable | — |
+| reports | auto | auto | auto | auto | auto | auto |
+| messaging | auto | auto | auto | auto | auto | auto |
+| financials | auto | — | — | auto | — | — |
+| equipment | auto | auto | grantable | auto | grantable | — |
+| seasonConfig | auto | — | — | auto | — | — |
+| orgSettings | auto | — | — | grantable | — | — |
+
+**Post-Gate 5a lock fixes (April 14, 2026):**
+- Unassigned scheduled games now require confirmation dialog before setup (same as assigned path) — lock was never claimed on "LOAD" path
+- `resumeGame` is now async and claims the lock if no active lock exists — lock was never claimed when tapping an in-progress game from the list
+- HC card click blocked when another user holds an active lock — HC must use Break Lock first, then resume normally
 
 ---
 
