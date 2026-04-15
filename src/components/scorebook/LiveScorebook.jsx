@@ -9,6 +9,7 @@ import useAutosave from "../../hooks/useAutosave";
 import { getSyncStatus, onSyncStatusChange } from "../../utils/syncStatus";
 import { subscribeLock, releaseLock, updateHeartbeat } from "../../utils/scorekeeperLock";
 import GameHeader from "./GameHeader";
+import GameClock from "./GameClock";
 import PlayerRow from "./PlayerRow";
 import OpponentStrip from "./OpponentStrip";
 import SubstitutionModal from "./SubstitutionModal";
@@ -31,11 +32,22 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId, use
   const [syncStatus, setSyncStatus] = useState(getSyncStatus());
   const [lockBroken, setLockBroken] = useState(false);
   const [lockBrokenBy, setLockBrokenBy] = useState("");
+  // OT periods added via +OT button — seeded from existing events on mount so refresh is safe
+  const [otPeriods, setOtPeriods] = useState(() => {
+    const g = db.scorebookGames.find(sg => sg.id === gameId);
+    if (!g) return 0;
+    const initPeriod = getCurrentPeriod(g.events || []);
+    const regPeriods = g.format?.periods || 4;
+    return Math.max(0, initPeriod - regPeriods);
+  });
   const myLockRef = useRef(false);       // true if this user currently holds the lock
   const heartbeatTimerRef = useRef(null);
   const lastHeartbeatRef = useRef(0);    // timestamp of last successful heartbeat write
   const HEARTBEAT_THROTTLE_MS = 30_000; // max 1 Firestore write per 30s (15-min inactivity threshold)
   const assistTimerRef = useRef(null);
+  // Holds the formatted clock string (e.g. "6:24") from the GameClock component.
+  // Stored in a ref so stat dispatches read the latest value without causing re-renders.
+  const clockTimeRef = useRef(`${initial?.format?.periodLength || 8}:00`);
 
   // Track network sync status
   useEffect(() => onSyncStatusChange(setSyncStatus), []);
@@ -111,7 +123,7 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId, use
 
   // ── Event dispatch ───────────────────────────────────────────────────────────
   const dispatch = useCallback((type, playerId = null, extras = {}) => {
-    const evt = createEvent(type, period, playerId, extras);
+    const evt = createEvent(type, period, playerId, { ...extras, gameClockTime: clockTimeRef.current });
     setGame(g => ({ ...g, events: [...g.events, evt] }));
 
     // Throttled heartbeat — triggered by activity but capped at 1 write per 30s.
@@ -147,6 +159,13 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId, use
   const dismissAssist = useCallback(() => {
     if (assistTimerRef.current) clearTimeout(assistTimerRef.current);
     setAssistMode(null);
+  }, []);
+
+  // ── Clock time sync ───────────────────────────────────────────────────────────
+  // Called by GameClock on every tick and on nudge — keeps clockTimeRef current
+  // without triggering a re-render (stats read from the ref at dispatch time).
+  const handleClockTimeChange = useCallback((timeStr) => {
+    clockTimeRef.current = timeStr;
   }, []);
 
   // ── Undo ─────────────────────────────────────────────────────────────────────
@@ -216,6 +235,16 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId, use
     setGame(g => ({ ...g, events: [...g.events, evt] }));
   }, []);
 
+  const handleAddOT = useCallback(() => {
+    const regPeriods = game?.format?.periods || 4;
+    setOtPeriods(prev => {
+      const newOtCount = prev + 1;
+      const evt = createEvent("period_change", regPeriods + newOtCount);
+      setGame(g => ({ ...g, events: [...g.events, evt] }));
+      return newOtCount;
+    });
+  }, [game?.format?.periods]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── End game ─────────────────────────────────────────────────────────────────
   const endGame = () => setShowEndGame(true);
 
@@ -269,8 +298,30 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId, use
     return numA - numB;
   });
 
-  const periodLabel = game.format.periodType === "quarter" ? `Q${period}` : `H${period}`;
-  const maxPeriods = game.format.periods;
+  // ── Clock / OT period computations ───────────────────────────────────────────
+  const regulationPeriods = game.format.periods;
+  const periodLengthSec = (game.format.periodLength || 8) * 60;
+  const OT_LENGTH_SEC = 300; // 5-minute OT (standard)
+  const isOTPeriod = period > regulationPeriods;
+  const thisPeriodLengthSec = isOTPeriod ? OT_LENGTH_SEC : periodLengthSec;
+
+  // Seed initial clock time from last stamped event in the current period.
+  // On a fresh period there are no such events, so the clock starts at full length.
+  // On app refresh mid-period this restores the last known time.
+  const lastClockEvt = [...events].reverse().find(
+    e => !e.deleted && e.period === period && e.gameClockTime,
+  );
+  const initialClockSec = lastClockEvt
+    ? (() => {
+        const parts = lastClockEvt.gameClockTime.split(":");
+        return parseInt(parts[0], 10) * 60 + (parseInt(parts[1], 10) || 0);
+      })()
+    : thisPeriodLengthSec;
+
+  const periodLabel = period > regulationPeriods
+    ? `OT${period - regulationPeriods}`
+    : game.format.periodType === "quarter" ? `Q${period}` : `H${period}`;
+  const maxPeriods = regulationPeriods + otPeriods;
 
   return (
     <div style={{
@@ -278,12 +329,23 @@ export default function LiveScorebook({ db, updateDb, gameId, onExit, orgId, use
       fontFamily: "'DM Sans',sans-serif", display: "flex", flexDirection: "column",
       overflow: "hidden", overscrollBehavior: "none", touchAction: "pan-y",
     }}>
+      {/* Game Clock — mounts fresh on every period change via key={period} */}
+      <GameClock
+        key={period}
+        periodLabel={periodLabel}
+        periodLengthSec={thisPeriodLengthSec}
+        initialTimeSec={initialClockSec}
+        onTimeChange={handleClockTimeChange}
+      />
+
       {/* Game Header */}
       <GameHeader
         periodLabel={periodLabel}
         period={period}
         maxPeriods={maxPeriods}
         onSetPeriod={handleSetPeriod}
+        onAddOT={handleAddOT}
+        otPeriods={otPeriods}
         homeScore={teamStats.score}
         awayScore={oppStats.score}
         teamFouls={teamStats.teamFouls}

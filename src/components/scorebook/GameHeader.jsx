@@ -3,7 +3,7 @@ import { T } from "../../utils/constants";
 
 export default function GameHeader({
   periodLabel, period, maxPeriods,
-  onSetPeriod,
+  onSetPeriod, onAddOT, otPeriods = 0,
   homeScore, awayScore,
   teamFouls, oppFouls,
   format,
@@ -34,11 +34,14 @@ export default function GameHeader({
   const homeFoulColor = homeBonusState === "double" ? T.red : homeBonusState === "single" ? "#F59E0B" : "#888";
   const oppFoulColor = oppBonusState === "double" ? T.red : oppBonusState === "single" ? "#F59E0B" : "#888";
 
-  // Period selector pills
-  const totalPeriods = maxPeriods || (format?.periodType === "quarter" ? 4 : 2);
-  const periodPillLabels = format?.periodType === "quarter"
-    ? Array.from({ length: totalPeriods }, (_, i) => `Q${i + 1}`)
-    : Array.from({ length: totalPeriods }, (_, i) => `H${i + 1}`);
+  // Period selector pills — regulation periods + any added OT periods
+  const regulationPeriods = format?.periods || (format?.periodType === "quarter" ? 4 : 2);
+  const periodPillLabels = [
+    ...Array.from({ length: regulationPeriods }, (_, i) =>
+      format?.periodType === "quarter" ? `Q${i + 1}` : `H${i + 1}`
+    ),
+    ...Array.from({ length: otPeriods }, (_, i) => `OT${i + 1}`),
+  ];
 
   // Fixed-height bonus badge slot — never causes layout shift
   const renderBonusBadge = (state) => (
@@ -96,7 +99,6 @@ export default function GameHeader({
             const p = i + 1;
             const isVisited = p < period;
             const isCurrent = p === period;
-            const isFuture = p > period;
             return (
               <button key={p} onClick={() => {
                 onSetPeriod(p);
@@ -115,6 +117,20 @@ export default function GameHeader({
               }}>{label}</button>
             );
           })}
+          {/* +OT button — adds next overtime period and advances to it */}
+          {onAddOT && (
+            <button onClick={() => {
+              onAddOT();
+              setPeriodSelectorOpen(false);
+            }} style={{
+              padding: "8px 14px", borderRadius: 20, fontSize: 13, fontWeight: 800,
+              cursor: "pointer",
+              background: "rgba(59,130,246,0.15)",
+              border: "1px solid rgba(59,130,246,0.4)",
+              color: T.blue,
+              fontFamily: "'DM Mono',monospace",
+            }}>+OT</button>
+          )}
         </div>
       )}
 
