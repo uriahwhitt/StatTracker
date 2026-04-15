@@ -550,15 +550,167 @@ function isSuperadmin() {
 
 ### 2.9 Navigation Structure
 
-5-tab bottom nav:
+#### End-State Navigation Model (Target: Gate 7.5)
 
-| Tab | Description |
+The app uses a **three-tab bottom nav** with a **persistent team context pill** at the top of the screen and a **slide-in sidebar** for context switching, secondary navigation, and low-frequency features.
+
+##### Bottom Tabs (universal — all roles)
+
+| Tab | Contents |
 |---|---|
-| **Track** | Individual player stat input. Personal tracker for parents and players. |
-| **Scorebook** | Team scorebook. Loads from scheduled game. Requires scorekeeper assignment + lock for team games. |
-| **History** | Read-only. Games / Players / Teams sub-views. Filter by tournament, team, player. |
-| **Reports** | All PDF and JSON exports. Scope selector: Player / Team / Game. Time range: Season / Tournament / Date range. |
-| **Manage** | Write-only. People segment (Orgs / Teams / Players CRUD) and Schedule segment (Tournaments / Games CRUD). |
+| **Chat** | Team and org communications — group channels, DMs, org announcements |
+| **Schedule** | Team calendar, upcoming games, events |
+| **Stats** | Scorebook (live scoring), game history, individual and team stat views |
+
+These three tabs represent the highest-frequency actions for every role. They are always visible regardless of which team context is active.
+
+##### Team Context Pill
+
+A persistent pill is pinned at the top of the screen, above all content, and remains fixed during vertical scroll. It displays the currently active team name. Tapping the pill opens the sidebar.
+
+```
+[ 🏀 Eagles 6U  ▾ ]
+```
+
+The pill is always visible. It is the single entry point into the sidebar. It communicates team context at a glance for coaches, parents, and scorekeepers regardless of which tab is active.
+
+##### Sidebar Structure
+
+The sidebar slides in from the left when the team context pill is tapped. It contains:
+
+1. **Team switcher dropdown** — at the top of the sidebar. Selecting a different team closes the dropdown and updates the active team context throughout the entire app (all three tabs scope to the new selection). The pill label updates to reflect the active team.
+
+2. **ORG section** — pinned at the top of the channel list, always visible regardless of which team is selected. Contains org-scoped channels and announcements. Visibility of individual items within this section is filtered by the user's permissions.
+
+3. **TEAM section** — scoped to the currently active team. Contains team-specific channels and direct messages.
+
+4. **Role-scoped secondary navigation** — below the channel list. Items visible here differ by role (see below).
+
+5. **Settings** — always present at the bottom of the sidebar.
+
+##### Sidebar Content by Role
+
+**Parent:**
+```
+[ Eagles 6U ▾ ]                    ← team switcher (shows child badge if multiple children)
+─────────────────────────────────
+ORG
+  📢 Announcements                 ← read-only; posted by owner
+  [any org channels user was added to]
+─────────────────────────────────
+TEAM — Eagles 6U
+  💬 Team Chat
+  [any custom team channels user was added to]
+─────────────────────────────────
+DIRECT MESSAGES
+  Coach Rivera
+─────────────────────────────────
+MY CHILD
+  Jake's Profile
+─────────────────────────────────
+ACCOUNT
+  Payments & Registration
+  Waivers & Documents
+  Settings
+```
+
+**Coach (Head Coach / Assistant Coach / Manager / Staff):**
+```
+[ Eagles 6U ▾ ]
+─────────────────────────────────
+ORG
+  📢 Announcements                 ← read-only unless owner
+  [any org channels coach was added to, e.g. "Head Coaches"]
+─────────────────────────────────
+TEAM — Eagles 6U
+  💬 Team Chat
+  [custom team channels this coach created or was added to]
+─────────────────────────────────
+DIRECT MESSAGES
+  Jake's Mom
+  Sophie's Dad
+─────────────────────────────────
+MANAGE TEAM
+  Roster
+  Schedule
+  Members
+  Permissions
+─────────────────────────────────
+REPORTS & EXPORTS
+─────────────────────────────────
+SETTINGS
+```
+
+**Org Owner:**
+```
+[ Eagles 6U ▾ ]                    ← team switcher includes all org teams
+─────────────────────────────────
+ORG
+  📢 Announcements                 ← owner can post here
+  🏆 Head Coaches                  ← owner-created custom channel
+  [any other custom org channels]
+  + New Org Channel                ← owner only
+─────────────────────────────────
+TEAM — Eagles 6U
+  💬 Team Chat
+  [custom team channels]
+  + New Team Channel               ← head coach or above
+─────────────────────────────────
+DIRECT MESSAGES
+  ...
+─────────────────────────────────
+MANAGE TEAM
+  Roster / Schedule / Members / Permissions
+─────────────────────────────────
+ORG SETTINGS
+  Billing
+  Org-Level Member Management
+  Org Announcements (compose)
+─────────────────────────────────
+REPORTS & EXPORTS
+─────────────────────────────────
+SETTINGS
+```
+
+##### Team Context Switcher — Dropdown Detail
+
+The dropdown lists all teams the user is a member of. For parents with multiple children, each entry shows a child badge:
+
+```
+Coach view:
+  Eagles 6U
+  Wildcats JV
+  Lincoln Varsity
+
+Parent view:
+  Eagles 6U      (Jake, Emma)
+  Wildcats Travel (Sophie)
+```
+
+The app persists the last selected team in localStorage and restores it on next launch.
+
+##### ORG Section Visibility Rules
+
+- The ORG section is **always present** in the sidebar regardless of which team is active in the switcher. There is no separate "org context" to switch to.
+- Each item in the ORG section is only visible to users who have been added to that channel, or who have org-level permissions.
+- A parent who has no org-level channel membership sees only `📢 Announcements` in the ORG section.
+- A head coach added to an org-level "Head Coaches" channel sees that channel in the ORG section from any team context.
+- The org owner sees all org channels and a `+ New Org Channel` control.
+- There is no UI concept of "switching to the org." The org is a persistent section, not a navigable context.
+
+##### Current Navigation (Pre-Gate 7.5)
+
+Until Gate 7.5 ships, the existing 5-tab bottom nav remains in place:
+
+| Tab | Current label |
+|---|---|
+| Track | Track |
+| Scorebook | Scorebook |
+| History | History |
+| Reports | Reports |
+| Manage | Manage |
+
+The Gate 7.5 restructure replaces this entirely. Do not partially migrate tabs — the shell restructure is an atomic change.
 
 ### 2.10 Visual Style Reference
 
@@ -1184,7 +1336,7 @@ const dmId = [uid1, uid2].sort().join('_')
 conversations/{conversationId} {
   type: "group",
   orgId: string,
-  teamId: string,
+  teamId: string | null,         // nullable — null for org-level channels
   name: string,
   allowReplies: boolean,
   memberUids: string[],
@@ -1199,7 +1351,10 @@ conversations/{conversationId} {
   ],
   lastMessage: string,
   lastMessageAt: timestamp,
-  createdBy: string
+  createdBy: string,
+  scope: "team" | "org",         // explicit scope indicator
+  managedBy: string | null,      // UID of channel manager; null = self-removal allowed
+  isSystemChannel: boolean,      // true for auto-created channels (team chat, announcements); false for custom
 }
 
 // Direct message
@@ -1266,52 +1421,115 @@ db.collection('conversations')
 
 ### 3.21 Communication UI Architecture
 
-**Team switcher (shared component, coach and parent):**
-```
-[ 🏀 Eagles Travel 6U ▾ ]
+#### Team Context Pill + Sidebar (see §2.9)
 
-Coach dropdown:
-  Eagles Travel 6U
-  Wildcats JV
-  Lincoln Varsity
+The team context pill and sidebar are the primary navigation mechanism for all communication features. Communication does not have its own independent navigation — it is surfaced through the Chat tab (bottom nav) scoped to the active team context set via the sidebar.
 
-Parent dropdown:
-  Eagles Travel 6U   (Jake + Emma)
-  Wildcats Travel    (Sophie)
-```
+#### Chat Tab — Layout by Role
 
-**Coach chat layout (Discord-inspired):**
-```
-Left sidebar (persistent, filterable):
-├── TEAM CHATS
-│   ├── # Eagles Travel 6U  🔴2
-│   ├── # Wildcats JV
-│   └── # Lincoln Varsity
-└── DIRECT MESSAGES
-    ├── Jake M.  •  Eagles          🔴1
-    ├── Sophie's Mom  •  Wildcats
-    └── ...
+**Parent (team-scoped view):**
 
-[Filter/search bar at top of sidebar]
-```
-DM labels always include a team identifier. Coaches do not need to switch context to reply to a DM.
+When a parent opens the Chat tab, they see only what is relevant to the currently active team:
 
-**Parent chat layout (team-scoped):**
 ```
-[ Eagles Travel 6U ▾ ]
-├── 💬 Team Chat
-└── ✉️  Coach Rivera
+[ Eagles 6U ▾ ]                 ← team context pill (tap to switch teams)
+─────────────────────────────────
+ORG
+  📢 Org Announcements
+
+TEAM
+  💬 Team Chat
+  [any custom channels they are in]
+
+DIRECT MESSAGES
+  Coach Rivera
 ```
 
-**Personal calendar view (parent):**
+Switching teams via the pill updates this view entirely. Simple, uncluttered, no cross-team noise.
+
+**Coach (unified view across teams):**
+
+Coaches see the full sidebar channel list. They do not need to switch team context to see a DM — DMs appear in the sidebar regardless of which team is active. Team identifier labels on DM entries provide context at a glance.
+
 ```
-📅  My Calendar
-    ☑ 🔵 Eagles Travel 6U
-    ☑ 🟢 Wildcats Travel
-    ☐ 🟠 Lincoln Middle    ← toggled off
+DM label format:  Jake's Mom  •  Eagles 6U
 ```
 
-### 3.22 Notifications (FCM)
+#### Notification Badges
+
+Unread message counts appear as red dot badges on:
+- Individual channel rows in the sidebar
+- The Chat tab in the bottom nav (aggregate across all channels)
+- The team context pill (if there is unread activity in the inactive team context)
+
+The pill badge ensures a parent or coach knows to switch team context without having to check manually.
+
+#### FCM Notification Deep-Link Behavior
+
+Unchanged from prior spec. Every FCM payload carries `conversationId`, `teamId`, and `type`. On notification tap:
+- **Coach:** Opens directly to the relevant conversation. No context switch needed.
+- **Parent:** App switches to the correct team context using `teamId`, then opens the conversation.
+
+### 3.22 Custom Channels
+
+#### Overview
+
+In addition to the auto-created team group chat, coaches and org owners can create custom named channels with a curated member list. These channels behave identically to group chats in the data model — they are `type: "group"` conversations with a custom `name` and explicit `memberUids`. No new schema is required.
+
+#### Scope
+
+Custom channels are scoped to either the **org level** or a **team level**, determined by which field is set at creation:
+
+| Scope | `orgId` | `teamId` | Who can create |
+|---|---|---|---|
+| Org-level | set | `null` | Org owner only |
+| Team-level | set | set | Head coach or above (gated by `permissions.messaging`) |
+
+Org-level channels appear in the **ORG section** of the sidebar for all members who have been added, regardless of which team is active in the switcher.
+
+Team-level channels appear in the **TEAM section** of the sidebar, scoped to the active team context.
+
+#### Creation Flow
+
+- Owner taps `+ New Org Channel` in the ORG section of the sidebar.
+- Head coach taps `+ New Team Channel` in the TEAM section of the sidebar.
+- Creator provides a channel name and selects members from the org or team member list.
+- The channel is created as a `type: "group"` conversation doc with `allowReplies: true` by default.
+- The channel appears immediately in the sidebar of all added members via the existing `onSnapshot` conversations query (`memberUids array-contains currentUid`).
+
+#### Member Management
+
+Each custom channel has a `managedBy` field set to the creator's UID. Only the `managedBy` user (or the org owner) can add or remove members after creation. Members cannot leave a managed channel on their own — they must be removed by the manager.
+
+For channels where self-removal makes sense (informal groups), `managedBy` can be set to `null` at creation time to allow member self-removal. This is a creator choice at channel creation.
+
+#### Org Announcements Channel
+
+The org announcements channel is a special-case org-level channel created automatically when an org is created. It has `allowReplies: false` and `managedBy: ownerUid`. Only the org owner can post to it. It appears in the ORG section of the sidebar for all org members regardless of role or team membership. It cannot be deleted.
+
+```js
+// Auto-created on org creation
+conversations/{orgId + "_announcements"} {
+  type: "group",
+  orgId: string,
+  teamId: null,
+  name: "Announcements",
+  allowReplies: false,
+  managedBy: ownerUid,
+  memberUids: [],           // populated as members join any team in the org
+  ...
+}
+```
+
+> **Note:** Populating `memberUids` on the announcements channel as new members join the org is an enrollment side effect that must be handled in the same approval flow that enrolls users into team group chats.
+
+#### Permissions Gate
+
+The `permissions.messaging` flag (part of the 13-flag permissions schema from Gate 5b) gates the ability to **create** custom team-level channels. Reading and participating in channels a user has been added to does not require this flag — it is governed solely by `memberUids` membership.
+
+Org-level channel creation is gated by `role === 'owner'` — not by a permissions flag — since it is inherently an owner action.
+
+### 3.23 Notifications (FCM)
 
 **Required payload fields:**
 ```js
@@ -1329,7 +1547,7 @@ DM labels always include a team identifier. Coaches do not need to switch contex
 
 **Notification badges** on team switcher indicate unread activity across all contexts.
 
-### 3.23 Communication Implementation Sequence
+### 3.24 Communication Implementation Sequence
 
 | Phase | Feature | Notes |
 |---|---|---|
@@ -1340,6 +1558,74 @@ DM labels always include a team identifier. Coaches do not need to switch contex
 | Comm 5 | Push notifications (FCM) | Deep-link routing by teamId + conversationId. |
 | Comm 6 | Read receipts | Confirm priority before building. |
 | Comm 7 | Announcement-only mode | `allowReplies` flag. |
+
+### 3.25 Sub-Org Architecture
+
+> **Status:** Phase A (schema prep) — ready for Gate 7 or Gate 7.5. Phase B (full feature) — deferred to Phase 3, Gate 9. See `SUB_ORG_ARCHITECTURE.md` for full specification.
+
+#### Overview
+
+Sub-orgs allow a large organization to create named divisions or districts under the top-level org. Disabled by default (`subOrgsEnabled: false`). Designed for the second target market: county parks and recreation programs divided into geographic districts.
+
+**Travel basketball (sub-orgs disabled — no change to current behavior):**
+```
+Org — Eagles Travel (Owner)
+  ├── 6U Team
+  ├── 8U Team
+  └── 10U Team
+```
+
+**Parks & Rec (sub-orgs enabled):**
+```
+Org — County Parks & Rec (Commissioner / Org Owner)
+  ├── District 1 (District Director)
+  │     ├── 8U Red
+  │     └── 10U A
+  └── District 2 (District Director)
+        └── 8U Gold
+```
+
+#### Phase A — Schema Prep (Gate 7 or Gate 7.5)
+
+Two additive nullable fields and one new subcollection. No UI. No new roles. No migration required for existing data.
+
+```js
+// Team doc addition
+orgs/{orgId}/teams/{teamId} {
+  subOrgId: string | null,   // null = team belongs directly to org (default)
+}
+
+// Org doc addition
+orgs/{orgId} {
+  subOrgsEnabled: boolean,   // false by default; owner-toggled
+}
+
+// New sub-org collection
+orgs/{orgId}/subOrgs/{subOrgId} {
+  id: string,
+  orgId: string,
+  name: string,              // e.g. "District 1", "North District"
+  createdAt: timestamp,
+  createdBy: string,         // owner UID
+}
+```
+
+**Claude Code tasks (Gate 7 or 7.5):**
+- Add `subOrgId: null` to `writeTeamDoc()` default shape
+- Add `subOrgsEnabled: false` to org creation doc in `writeOrgDoc()`
+- Define `orgs/{orgId}/subOrgs/{subOrgId}` collection in `firestore.rules` with owner-only write, org-member read
+
+#### Phase B — Full Feature (Phase 3, Gate 9)
+
+Prerequisites: Gate 7.5 (App Shell Restructure) and Gate 8 (Communication) complete. Full scope includes:
+- Sub-org management UI (create/rename/delete districts, assign teams)
+- **District Director role** — new role scoped to `orgId + subOrgId`; sits between Org Owner and Head Coach; compliance + reports + messaging access across all teams in their district; no scorebook access
+- Sidebar team switcher grouped by district when `subOrgsEnabled: true` (flat list otherwise — no change to travel orgs)
+- District-level communications channels (scope: `"district"`, requires `subOrgId` field on conversation doc)
+- Firestore security rules for `isDistrictDirector()` helper and sub-org collection
+- **Billing gate:** sub-org feature locked to Org Standard or above
+
+> **Open questions before Phase B planning:** invite flow for district directors, multiple directors per district, team reassignment between districts, district director read access to team chats, sub-org deletion behavior. See `SUB_ORG_ARCHITECTURE.md §Open Questions`.
 
 ---
 
@@ -1588,6 +1874,37 @@ Transfer code to coach device. Coach validates History + Reports read-only.
 
 **Test condition:** Create player profile, generate claim link, accept on test parent account, approve as coach. Confirm player profile accessible from parent account. Confirm archiving season membership does not break access.
 
+#### Gate 7.5 — App Shell Restructure ⬜ NOT STARTED
+
+**Prerequisite:** Gate 7 (Player Profile System) must be complete. Gate 7 introduces parent users with child profiles, which makes the current 5-tab nav structurally wrong for the parent role. Gate 7.5 fixes this before Gate 8 adds the Chat tab.
+
+**Scope:**
+
+This gate is a **shell-only restructure**. No new features are built. All existing functionality is preserved and redistributed into the new nav model.
+
+| Item | Detail |
+|---|---|
+| Replace 5-tab bottom nav with 3-tab bottom nav | Tabs: Chat, Schedule, Stats |
+| Build persistent `TeamContextPill` component | Pinned above all content; fixed during scroll; displays active team name; tap opens sidebar |
+| Build `AppSidebar` component | Slides in from left on pill tap; contains team switcher dropdown, ORG section, TEAM section, role-scoped secondary nav, settings |
+| Implement team switcher dropdown | Lists all teams user belongs to; parent entries show child badge; persists selection to localStorage |
+| ORG section (static shell) | Always visible in sidebar; `📢 Announcements` placeholder; no functional comms yet — wired in Gate 8 |
+| TEAM section (static shell) | `💬 Team Chat` placeholder; no functional comms yet — wired in Gate 8 |
+| Redistribute existing tabs into new structure | Scorebook → Stats tab; History → Stats tab (sub-view); Reports → sidebar (coach/owner only); Manage → sidebar (coach/owner only); Child Profile → sidebar (parent only) |
+| Role-scoped sidebar rendering | Parent, Coach, and Owner sidebar layouts as specified in §2.9 |
+| Sub-org schema prep (Phase A) | Add `subOrgId: null` to `writeTeamDoc()`; add `subOrgsEnabled: false` to `writeOrgDoc()`; define `orgs/{orgId}/subOrgs/{subOrgId}` collection in `firestore.rules` — no UI, fully additive |
+| Remove orange context banner | Remove the orange context banner from History/Reports — team context is now communicated by the persistent pill |
+
+**What does NOT change in this gate:**
+- No communication functionality is built (that is Gate 8)
+- The `conversations` Firestore collection is not written to
+- The ORG and TEAM channel items in the sidebar are non-functional placeholders
+- All existing scorebook, history, reports, and manage functionality is fully preserved
+
+**Architecture note:** The sidebar is the single source of team context for the entire app. After Gate 7.5, the existing `activeTeam` / `activeOrg` state in `App.jsx` is driven by the sidebar team switcher selection rather than the top-of-screen pill row. All child components that currently read `activeTeam` continue to work unchanged — only the source of that state changes.
+
+**Test condition:** Install as returning user after Gate 7 complete. Confirm 3-tab nav renders correctly. Confirm team switcher opens sidebar and switches active team context across all tabs. Confirm role-scoped sidebar sections render correctly for parent, coach, and owner accounts. Confirm all existing scorebook, history, reports, and manage features remain accessible and functional.
+
 #### Gate 8 — Welcome Screen, Onboarding & UX Polish ⬜ NOT STARTED
 
 - Welcome Screen with "Get Started" and "Sign in with Google" paths
@@ -1606,20 +1923,34 @@ Transfer code to coach device. Coach validates History + Reports read-only.
 
 ### Phase 3 — Communication Features (Post–Gate 8)
 
-All communication work is gated on Gate 7 (player profiles + claim codes) being complete. Implementation sequence: Comm 1 (group chat) → Comm 2 (team calendar) → Comm 3 (personal calendar) → Comm 4 (DMs) → Comm 5 (notifications).
+All communication work is gated on Gate 7.5 (App Shell Restructure) being complete. The new 3-tab nav and sidebar are the structural foundation for all communication UI. Implementation sequence: Comm 1 (group chat) → Comm 2 (team calendar) → Comm 3 (personal calendar) → Comm 4 (DMs) → Comm 5 (notifications).
 
-See §4 for full specifications.
+See §3.20–§3.24 for full specifications.
 
 ---
 
 ### Future / Deferred (Phase 3+)
 
+#### ⚠️ Deferred Planning Required — Dual Scorebook & Game Ownership
+
+> **Full planning session required before implementation.** See `DUAL_SCOREBOOK_GAME_OWNERSHIP_STUB.md` for the complete stub with mental model, open questions, and implementation order. Do not begin implementation planning until Gate 9 (Sub-Org) is complete and a dedicated planning session has resolved the open questions in that document.
+
+Core concepts captured in stub:
+- **Game tier model:** Tier 1 (Ghost/internal), Tier 2 (Exhibition/linked between orgs), Tier 3 (Tournament official record)
+- **Dual scorebook:** Write domain partitioning (home tablet owns `homeEvents`, away tablet owns `awayEvents`). Conflict detection via `homeObservedScore` / `awayObservedScore` comparison. Non-blocking discrepancy alert inline in UI.
+- **Scorekeeper lock extension:** Two simultaneous locks per game (home + away), each claimed independently
+- **Finalization authority:** Mutual confirmation (exhibition), organizer-controlled (tournament)
+- **Stat profiles:** Full (all stats) vs. Standard (points + fouls + timeouts per player) — set at game creation
+- **Use cases:** Tournament hosting (NTBA/Big Shots), parks & rec cross-district games, exhibition between two app orgs, exhibition against a non-app team (anonymous stubs + share link)
+
+> **Open questions (resolve in planning session):** exhibition finalization authority, orphaned stat book retroactive linking, correction request flow for finalized tournament records, score discrepancy threshold (zero vs. ±1–2 buffer), dual-lock heartbeat/stale detection, HC override on dual game, period sync between tablets, stat profile configurability, tournament organizer account type. See stub for full list.
+
+#### Feature Backlog
+
 | Feature | Notes |
 |---|---|
-| Dual-team simultaneous scorekeeping | Two scorekeepers, one game. Requires conflict detection. |
-| Real-time conflict notification between scorekeepers | Dependent on above. |
-| Tournament organizer mode | Multi-org bracket building. `tournament.createdByOrgId` already nullable. |
-| Official score table mode | Both teams tracked. Schema: add `awayTeamId` + `awayRoster[]` to `scorebookGame`. |
+| Sub-Org / District Director | Phase 3, Gate 9. Full spec in `SUB_ORG_ARCHITECTURE.md`. Schema prep added to Gate 7.5. |
+| Tournament organizer mode | Multi-org bracket building. Tier 3 game records. `tournament.createdByOrgId` already nullable. |
 | Camera-assisted clock sync | `clockSynced` flag is already on every event (always `false` until implemented). |
 | Spectator view via public URL | Read-only for fans without an account. |
 | Recruiting profile enhancements | Trend charts, tournament-only stat filters, comparison to team averages. |
@@ -1629,6 +1960,10 @@ See §4 for full specifications.
 | AI-assisted document verification | Claude Vision pre-fills coach checklist on high-confidence match. |
 | Sport expansion | Document vault and task system already generic. Football physicals, soccer age verification, etc. |
 | Geographic expansion | Self-registration model supports rapid scaling without provisioning bottleneck. |
+
+#### ⚠️ Monetization & Features — Detailed Planning Pending
+
+> See `MONETIZATION_AND_FEATURES_PLAN.md` for the full planning document covering: pricing tiers, Stripe implementation, grandfathering, invitation system, jersey number management, task & compliance system, document vault (Phase 1 manual + Phase 2 AI-assisted), tournament readiness dashboard, season configuration, and super admin console. Core decisions already reflected in §5 (Monetization & Billing) and §6 (Admin Consoles). Open questions from that document have been merged into §8 (Open Questions) below.
 
 ---
 
@@ -1731,4 +2066,5 @@ Organized by feature area. All require decisions before or during implementation
 
 *End of WE TRACK Master Planning Document*
 *Source documents consolidated: ARCHITECTURE.md, PHASE2_ARCHITECTURE.md, COMMUNICATION_PLAN.md, stattracker_monetization_and_features_planning.md, IMPLEMENTATION_STATUS.md*
-*Next update: After Gate 2 E2E test is confirmed and Gate 3 scope is decided*
+*April 14, 2026 update: §2.9 Navigation Structure replaced (3-tab + sidebar model); §3.20 group conversation schema updated (teamId nullable, scope/managedBy/isSystemChannel fields added); §3.21 Communication UI Architecture replaced; §3.22 Custom Channels added; §3.23–§3.24 renumbered; §3.25 Sub-Org Architecture added; Gate 7.5 App Shell Restructure added; Future/Deferred section updated with Dual Scorebook stub reference and Monetization plan reference.*
+*Companion planning stubs: MASTER_PLAN_UPDATE_NAV_COMMS.md (incorporated), SUB_ORG_ARCHITECTURE.md (Phase A incorporated, Phase B deferred to Gate 9), DUAL_SCOREBOOK_GAME_OWNERSHIP_STUB.md (stub only — full planning session required), MONETIZATION_AND_FEATURES_PLAN.md (key decisions incorporated, open questions merged into §8)*
