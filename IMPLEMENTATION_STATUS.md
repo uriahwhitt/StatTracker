@@ -1,11 +1,12 @@
 # WE TRACK — Implementation Status
-**Date:** April 14, 2026 | **Branch:** `main` / `dev`
+**Date:** April 15, 2026 | **Branch:** `main` / `dev`
 
 ---
 
 ## Current Position in Build Sequence
 
-**At:** Phase 2, Gate 6 — Scorebook Game Clock (not yet started)
+**At:** Phase 2, Gate 6 — Scorebook Game Clock ✅ COMPLETE (pending live UI test)
+**Next:** Gate 7 — Player Profile System + Claim Codes
 **Last completed:** Gate 5b — Permissions Schema + New Roles ✅ (April 14, 2026)
 **Gate 5a completed:** Scorekeeper Assignment + Game Lock ✅ (April 7, 2026)
 **Gate 4 completed:** Parent Join Codes + Live Read ✅ (April 2, 2026)
@@ -209,16 +210,23 @@ Implemented on branch `fix/tournament-issues`. Root causes and UX issues surface
 
 ---
 
-### Gate 6 — Scorebook Game Clock ⬜ NOT STARTED
+### Gate 6 — Scorebook Game Clock ✅ COMPLETE
 
-- `src/components/scorebook/GameClock.jsx` (new component)
-- Configurable period length, Start/Stop toggle
-- Edit mode with nudge buttons (+10s, -10s, +1s, -1s)
-- `gameClockTime` field on each stat event
+| Item | Status |
+|---|---|
+| Countdown clock displayed at top of Scorebook screen | ✅ Done |
+| Counts down from configurable period length | ✅ Done |
+| Manual start/stop toggle | ✅ Done |
+| Edit mode with nudge buttons (+10s, -10s, +1s, -1s) — clock auto-pauses on open, resumes on Done | ✅ Done |
+| `gameClockTime` string attached to each stat event (null if clock stopped) | ✅ Done |
+
+**Test condition:** Pending live UI test.
 
 ---
 
 ### Gate 7 — Player Profile System + Claim Codes ⬜ NOT STARTED
+
+> ⚠️ Schema dependency: Gate 7 must implement the player entity model defined in PLAYER_ENTITY_SCHEMA.md. Read that document in full before writing any code for this gate.
 
 - `/players/{playerId}` and `/coaches/{coachId}` top-level collections
 - "Generate Claim Link" in Manage → Roster
@@ -280,7 +288,6 @@ Prerequisites: Gates 3, 4, and 7 must be complete.
 | `IMPLEMENTATION_STATUS.md` | ✅ Current | This file — gate completion status |
 | `CLAUDE.md` | ✅ Current | Branch workflow, coding constraints, style guide |
 | `firestore.rules` | ✅ Current | Deployed security rules (deploy with `firebase deploy --only firestore:rules`) |
-| `ARCHITECTURE.md` | ⚠️ Superseded | Phase 1/1.5 reference only |
-| `PHASE2_ARCHITECTURE.md` | ⚠️ Superseded | Phase 2 auth/role reference only |
-| `COMMUNICATION_PLAN.md` | ⚠️ Superseded | Phase 3 communication pre-planning — see `MASTER_PLAN.md §4` |
-| `PLANNING_SUMMARY.md` | ⚠️ Superseded | March 23, 2026 session notes |
+| `PLAYER_ENTITY_SCHEMA.md` | ✅ Canonical | Player-primary sport-agnostic schema — Gate 7+ reference |
+| `SUB_ORG_ARCHITECTURE.md` | ✅ Active stub | Phase B deferred to Gate 9. Phase A schema prep in Gate 7.5. |
+| `DUAL_SCOREBOOK_GAME_OWNERSHIP_STUB.md` | ✅ Active stub | Full planning session required before implementation |

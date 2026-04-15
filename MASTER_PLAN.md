@@ -2,9 +2,9 @@
 
 **App:** WE TRACK (StatTracker)
 **Owner:** Whitt's End LLC
-**Last Updated:** April 14, 2026
+**Last Updated:** April 15, 2026
 **Branch:** `main` / `dev`
-**Status:** Phase 2, Gate 5b complete — next up: Gate 6 (Scorebook Game Clock)
+**Status:** Phase 2, Gate 6 complete — Gate 7 next
 
 > **How to use this document:** This is the single canonical reference for all architecture, feature design, and build planning. It supersedes all prior planning documents (`ARCHITECTURE.md`, `PHASE2_ARCHITECTURE.md`, `COMMUNICATION_PLAN.md`, `stattracker_monetization_and_features_planning.md`). Where those documents conflict, this document reflects the resolved decision or flags the conflict as an open question. Future Claude Code sessions should reference this document first.
 
@@ -73,6 +73,7 @@ The following decisions are final across all phases.
 | **IDs** | All IDs are UUID strings. Compatible with both localStorage and Firestore document IDs. |
 | **Superadmin** | Implemented as Firebase Auth custom claim (`superadmin: true`). Never stored in Firestore. Set manually via Firebase Admin SDK for Whitt's End account only. |
 | **Transfer codes** | Permanent. Six-character code, 10-minute TTL, maps device UID in `transferCodes/{code}`. Remains the sync mechanism for anonymous users and a fallback for authenticated users. |
+| **Player-primary schema** | Player entity is permanent and primary. Stats live under the player, sport-namespaced. Orgs/teams are authority contexts, not owners. See PLAYER_ENTITY_SCHEMA.md. |
 
 ### 2.2 Organizational Hierarchy
 
@@ -730,6 +731,32 @@ T.red     = "#ef4444"                    // errors, fouls, danger
 ```
 
 > **Modal pattern:** Do not use `position: fixed`. Use a faux viewport: wrapper div with `minHeight`, `flex`, `alignItems: center`, `background: rgba(0,0,0,0.85)`.
+
+### 2.12 Player-Primary Sport-Agnostic Schema
+
+**Canonical reference:** `PLAYER_ENTITY_SCHEMA.md` supersedes any prior schema definitions that treat orgs or teams as the owner of player identity or stat history. All Gate 7+ implementation must conform to that document.
+
+**Locked architectural principles (do not revisit):**
+
+- **Player is the primary entity.** Orgs and teams are organizational contexts — they do not own player identity or stat history.
+- **Stats are permanently owned by the player.** Game records live under `players/{playerId}/stats/{sport}/games/`. Org and team are immutable metadata tags, not the storage hierarchy. Stats survive org deletion, expiry, or any number of player transfers.
+- **Sport lives on the team.** Each team has exactly one sport. Orgs can have multi-sport teams.
+- **Sport templates are defined by superadmin.** Org owners pick one template per team at creation. Templates are not editable by orgs. This drives the scorebook engine — no sport-specific logic is hardcoded.
+- **Memberships are temporal.** A membership record represents one player's relationship to one team in one season. Archived, never deleted. Career history is the full membership chain.
+- **Sub-orgs are child orgs.** Players hold a membership at the org level and are assigned to a sub-org and team beneath it.
+- **Verified vs. self-reported is permanent and immutable.** Player controls public visibility, not the verified flag itself.
+
+**New top-level collections introduced in Gate 7+:**
+
+| Collection | Purpose | Gate |
+|---|---|---|
+| `/sportTemplates/{sport}` | Superadmin-defined stat definitions and format defaults | Gate 7 prep |
+| `/players/{playerId}/stats/{sport}/games/{gameId}` | Permanent player stat records | Gate 7 |
+| `/players/{playerId}/memberships/{membershipId}` | Temporal team/org relationships | Gate 7 |
+| `/players/{playerId}/documents/{docType}` | Birth certs, waivers — Firebase Storage backed | Gate 7 |
+| `/orgs/{orgId}/subOrgs/{subOrgId}` | Child org units (schema prep) | Gate 7.5 |
+
+**Migration strategy (Gate 7):** Historical game records in `orgs/{orgId}/data/db` are not migrated immediately. New games finalized after Gate 7 write stat records to both the player entity (new) and retain the scorebook game under the team (unchanged). Historical backfill is a one-time post-Gate-7 script, not a Gate 7 deliverable.
 
 ---
 
@@ -1848,31 +1875,48 @@ Transfer code to coach device. Coach validates History + Reports read-only.
 - Owner promotes HC to co-owner; two owners visible in panel; original owner steps down to Org Staff
 - Org Staff account sees full org history but cannot access scorebook or manage players
 
-#### Gate 6 — Scorebook Game Clock ⬜ NOT STARTED
+#### Gate 6 — Scorebook Game Clock ✅ COMPLETE
 
-- `src/components/scorebook/GameClock.jsx` — new component
-- Configurable period length (whole minutes)
-- Start / Stop toggle
-- Edit mode with nudge buttons (+10s, -10s, +1s, -1s)
-- Auto-pause on edit; resume on Done
-- `gameClockTime` field on each stat event
-- Clock bar integrated above Scorebook input area
+Functionally complete, pending live UI test.
 
-**Test condition:** Start simulated game. Run clock, stop mid-period, nudge resync by 8 seconds, resume, confirm adjusted time on subsequent stat entries.
+- `src/components/scorebook/GameClock.jsx` — new component ✅
+- Configurable period length (whole minutes) ✅
+- Start / Stop toggle ✅
+- Edit mode with nudge buttons (+10s, -10s, +1s, -1s) ✅
+- Auto-pause on edit; resume on Done ✅
+- `gameClockTime` field on each stat event ✅
+- Clock bar integrated above Scorebook input area ✅
+
+**Test condition:** Pending live UI test.
 
 #### Gate 7 — Player Profile System + Claim Codes ⬜ NOT STARTED
 
-- `/players/{playerId}` top-level collection and schema
-- `/coaches/{coachId}` top-level collection and schema
-- Manage → Roster → [Player] → "Generate Claim Link" flow
-- `/claimCodes/{code}` collection
-- Claim acceptance: open link → Google sign-in → select relationship → pending approval
-- Coach approval flow: notification of pending link requests, approve/deny UI
-- Player profile linked to Google account(s) on approval
-- Season archiving logic
-- Firestore security rules for `/players/` and `/coaches/`
+> ⚠️ **Schema dependency:** This gate must implement the player entity model defined in `PLAYER_ENTITY_SCHEMA.md`. Read that document before writing any code. The schema defined there supersedes any player/stats/membership schema previously described in this document.
 
-**Test condition:** Create player profile, generate claim link, accept on test parent account, approve as coach. Confirm player profile accessible from parent account. Confirm archiving season membership does not break access.
+**Sport template bootstrap (superadmin task — do once before Gate 7 ships):**
+- Create `/sportTemplates/basketball` document in Firestore console with full `statDefinitions` array (`2pt_made`, `3pt_made`, `ft_made`, `oreb`, `dreb`, `assist`, `steal`, `block`, `turnover`, `personal_foul`, `technical_foul` and their opponent/team equivalents)
+- This is a manual superadmin operation, not application code
+
+**Firestore collections to create:**
+- `/sportTemplates/{sport}` — read by all authenticated users; write by superadmin only
+- `/players/{playerId}/profile` — see PLAYER_ENTITY_SCHEMA.md §6
+- `/players/{playerId}/memberships/{membershipId}` — see §6
+- `/players/{playerId}/stats/{sport}/games/{gameId}` — see §7
+- `/players/{playerId}/documents/{docType}` — metadata only; files in Firebase Storage
+- `/coaches/{coachId}/profile` — see §9
+
+**Application features:**
+- Manage → Roster → [Player] → "Generate Claim Link" flow
+- `/claimCodes/{code}` collection and claim acceptance flow
+- Claim acceptance: open link → Google sign-in → select relationship → pending approval
+- Coach approval flow: notification of pending requests, approve/deny UI
+- Player profile linked to Google account(s) on approval
+- On game finalization: write stat records to `players/{playerId}/stats/{sport}/games/{gameId}` with `verified: true`
+- Season archiving logic: mark memberships archived at season end
+- Firestore security rules for all new collections (see PLAYER_ENTITY_SCHEMA.md §15)
+- Sub-org schema Phase A: add `subOrgId: null` to `writeTeamDoc()` and `subOrgsEnabled: false` to `writeOrgDoc()` — additive only, no UI
+
+**Test condition:** Create player profile, generate claim link, accept on test parent account, approve as coach. Confirm player profile accessible from parent account. Finalize a scorebook game and confirm stat record written to `players/{playerId}/stats/basketball/games/`. Confirm archiving season membership does not break access to stat history.
 
 #### Gate 7.5 — App Shell Restructure ⬜ NOT STARTED
 
@@ -2064,7 +2108,11 @@ Organized by feature area. All require decisions before or during implementation
 
 ---
 
-*End of WE TRACK Master Planning Document*
-*Source documents consolidated: ARCHITECTURE.md, PHASE2_ARCHITECTURE.md, COMMUNICATION_PLAN.md, stattracker_monetization_and_features_planning.md, IMPLEMENTATION_STATUS.md*
-*April 14, 2026 update: §2.9 Navigation Structure replaced (3-tab + sidebar model); §3.20 group conversation schema updated (teamId nullable, scope/managedBy/isSystemChannel fields added); §3.21 Communication UI Architecture replaced; §3.22 Custom Channels added; §3.23–§3.24 renumbered; §3.25 Sub-Org Architecture added; Gate 7.5 App Shell Restructure added; Future/Deferred section updated with Dual Scorebook stub reference and Monetization plan reference.*
-*Companion planning stubs: MASTER_PLAN_UPDATE_NAV_COMMS.md (incorporated), SUB_ORG_ARCHITECTURE.md (Phase A incorporated, Phase B deferred to Gate 9), DUAL_SCOREBOOK_GAME_OWNERSHIP_STUB.md (stub only — full planning session required), MONETIZATION_AND_FEATURES_PLAN.md (key decisions incorporated, open questions merged into §8)*
+*Planning document suite last cleaned: April 15, 2026*
+*Canonical files: MASTER_PLAN.md, IMPLEMENTATION_STATUS.md, CLAUDE.md,*
+*PLAYER_ENTITY_SCHEMA.md, SUB_ORG_ARCHITECTURE.md,*
+*DUAL_SCOREBOOK_GAME_OWNERSHIP_STUB.md*
+*All prior planning documents (ARCHITECTURE.md, PHASE2_ARCHITECTURE.md,*
+*COMMUNICATION_PLAN.md, STATTRACKER_PRD.md, MONETIZATION_AND_FEATURES_PLAN.md,*
+*PLANNING_SUMMARY.md, MASTER_PLAN_UPDATE_NAV_COMMS.md, local_store.md)*
+*have been deleted. Their content is fully consolidated into MASTER_PLAN.md.*

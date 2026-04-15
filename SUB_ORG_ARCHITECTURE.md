@@ -48,6 +48,8 @@ Org — Eagles Travel (Owner)
 
 ### Phase A — Schema Prep (Gate 7 or earlier)
 
+> **Schema update:** The sub-org collection and field definitions in this document are consistent with PLAYER_ENTITY_SCHEMA.md §4. If there is any conflict, PLAYER_ENTITY_SCHEMA.md takes precedence.
+
 **Do this now while the database is small and a clean reseed is trivial.**
 
 Two additive nullable fields only. No UI. No new roles. No rule changes. No migration
