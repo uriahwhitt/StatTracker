@@ -45,7 +45,7 @@ NC travel basketball is the launch market — a tight-knit community where word-
 
 ### Current Status Summary (as of April 14, 2026)
 
-Phase 1 and 1.5 are fully complete. Phase 2 Gates 1–5b are complete: Google OAuth, org + role infrastructure, coach invite flow, parent join codes + live read, post-tournament stability fixes, scorekeeper assignment + game lock (Gate 5a), and permissions schema + new roles (Gate 5b). Gate 6 (Scorebook Game Clock) is next.
+Phase 1 and 1.5 are fully complete. Phase 2 Gates 1–5b are complete: Google OAuth, org + role infrastructure, coach invite flow, parent join codes + live read, post-tournament stability fixes, scorekeeper assignment + game lock (Gate 5a), and permissions schema + new roles (Gate 5b). Gate 6 (Scorebook Game Clock) is complete. Gate 7 (Player Profile System + Claim Codes) is next.
 
 See [§7 — Build Phases](#7-build-phases) for full gate status and remaining work.
 
