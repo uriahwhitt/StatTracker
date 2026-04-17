@@ -257,7 +257,9 @@ This app installs as a PWA. The service worker aggressively caches assets, which
 | `CLAUDE.md` | ✅ Current | This file — Claude Code working context |
 | `firestore.rules` | ✅ Current | Deployed security rules |
 | `PLAYER_ENTITY_SCHEMA.md` | ✅ Canonical | Player-primary sport-agnostic schema — required reading before Gate 7 |
+| `GATE7_TASKING.md` | ✅ Ready | Gate 7 + 7.5 combined tasking document — player profiles, claim codes, app shell restructure |
 | `SUB_ORG_ARCHITECTURE.md` | ✅ Active stub | Sub-org feature — Phase A schema prep in Gate 7.5, Phase B in Gate 9 |
 | `DUAL_SCOREBOOK_GAME_OWNERSHIP_STUB.md` | ✅ Active stub | Dual scorebook planning — full session required before implementation |
+| `DIVISION_ELIGIBILITY_STUB.md` | ✅ Active stub | Division & eligibility rules — planning session required before implementation |
 
 > All prior planning documents (`ARCHITECTURE.md`, `PHASE2_ARCHITECTURE.md`, `COMMUNICATION_PLAN.md`, `PLANNING_SUMMARY.md`, `STATTRACKER_PRD.md`, `MONETIZATION_AND_FEATURES_PLAN.md`, `MASTER_PLAN_UPDATE_NAV_COMMS.md`, `local_store.md`) have been permanently deleted. Their content is fully consolidated into `MASTER_PLAN.md`. Do not reference these files.

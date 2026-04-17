@@ -5,3 +5,4 @@ dist/
 .env
 scripts/serviceAccountKey.json
 scripts/recover.js
+backup/

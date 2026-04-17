@@ -1,15 +1,18 @@
 # WE TRACK — Implementation Status
-**Date:** April 15, 2026 | **Branch:** `main` / `dev`
+**Date:** April 17, 2026 | **Branch:** `main` / `dev`
 
 ---
 
 ## Current Position in Build Sequence
 
-**At:** Phase 2, Gate 6 — Scorebook Game Clock ✅ COMPLETE (pending live UI test)
-**Next:** Gate 7 — Player Profile System + Claim Codes
-**Last completed:** Gate 5b — Permissions Schema + New Roles ✅ (April 14, 2026)
+**At:** Phase 2, Gate 6 — Scorebook Game Clock ✅ COMPLETE
+**Next:** Gate 7 — Player Profile System + Claim Codes (planning complete, implementation starts after tournament)
+**Last completed:** Gate 6 — Scorebook Game Clock ✅ (April 15, 2026)
+**Gate 5b completed:** Permissions Schema + New Roles ✅ (April 14, 2026)
 **Gate 5a completed:** Scorekeeper Assignment + Game Lock ✅ (April 7, 2026)
 **Gate 4 completed:** Parent Join Codes + Live Read ✅ (April 2, 2026)
+
+**Tournament note (April 17, 2026):** Owner is at a tournament — expect 3+ additional games in the database before Gate 7 implementation begins. Pre-Gate-7 Firestore backup captured on April 16 (5 scorebookGames, 53 games, 12 players).
 
 ---
 
@@ -220,13 +223,31 @@ Implemented on branch `fix/tournament-issues`. Root causes and UX issues surface
 | Edit mode with nudge buttons (+10s, -10s, +1s, -1s) — clock auto-pauses on open, resumes on Done | ✅ Done |
 | `gameClockTime` string attached to each stat event (null if clock stopped) | ✅ Done |
 
-**Test condition:** Pending live UI test.
+**Test condition:** Live UI test at upcoming tournament (April 17, 2026).
+
+---
+
+### Pre-Gate-7 Backup Tooling ✅ COMPLETE (April 16, 2026)
+
+Admin SDK export scripts for pre-migration data safety.
+
+| Item | Status |
+|---|---|
+| `scripts/exportGate7Backup.js` — reads `orgs/{orgId}/data/db` via Admin SDK, writes per-collection JSON to `backup/` | ✅ Done |
+| `scripts/checkUser.js` — look up Firebase Auth user by UID or email, print profile + custom claims | ✅ Done |
+| `npm run backup:gate7` — convenience script | ✅ Done |
+| `backup/` added to `.gitignore` | ✅ Done |
+| Initial backup snapshot: 5 scorebookGames, 53 games, 12 players, full db rollback file | ✅ Captured April 16, 2026 |
+
+**Superadmin UID confirmed:** `QWdefI9tAidXCnt3Erd7q9CaHp32` (uriah.whittemore@whittsend.org, `superadmin: true` custom claim verified)
 
 ---
 
 ### Gate 7 — Player Profile System + Claim Codes ⬜ NOT STARTED
 
 > ⚠️ Schema dependency: Gate 7 must implement the player entity model defined in PLAYER_ENTITY_SCHEMA.md. Read that document in full before writing any code for this gate.
+
+> 📋 Full tasking document: `GATE7_TASKING.md` (covers Gate 7 + Gate 7.5 combined)
 
 - `/players/{playerId}` and `/coaches/{coachId}` top-level collections
 - "Generate Claim Link" in Manage → Roster
@@ -289,5 +310,7 @@ Prerequisites: Gates 3, 4, and 7 must be complete.
 | `CLAUDE.md` | ✅ Current | Branch workflow, coding constraints, style guide |
 | `firestore.rules` | ✅ Current | Deployed security rules (deploy with `firebase deploy --only firestore:rules`) |
 | `PLAYER_ENTITY_SCHEMA.md` | ✅ Canonical | Player-primary sport-agnostic schema — Gate 7+ reference |
+| `GATE7_TASKING.md` | ✅ Ready | Gate 7 + 7.5 combined tasking document |
 | `SUB_ORG_ARCHITECTURE.md` | ✅ Active stub | Phase B deferred to Gate 9. Phase A schema prep in Gate 7.5. |
 | `DUAL_SCOREBOOK_GAME_OWNERSHIP_STUB.md` | ✅ Active stub | Full planning session required before implementation |
+| `DIVISION_ELIGIBILITY_STUB.md` | ✅ Active stub | Division/eligibility rules — planning session required before implementation |
